@@ -1,15 +1,25 @@
 import type { Model } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { onWebSubscriptionPacket, webSubscriptionRequest, webSubscriptionsEnabled } from "./subscription-runtime.ts";
 import type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 import type { AdmissionScope, NoDispatchKind } from "./chatgpt-request-cycle.ts";
 export type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 export interface Stamp { epoch: number; authorityRevision: number; revision: number }
 interface StatusValue extends Stamp { status: ChatGPTStatus }
-interface ModelsValue extends StatusValue { accountId: string | null; models: { id: string; name: string }[] }
+interface ChatGPTCatalogItem {
+	id: string;
+	name: string;
+	contextWindow?: number;
+	maxTokens?: number;
+	input?: ("text" | "image")[];
+	reasoning?: boolean;
+	supportedReasoningLevels?: string[];
+}
+interface ModelsValue extends StatusValue { accountId: string | null; models: ChatGPTCatalogItem[] }
 interface LeaseValue extends Stamp { accessToken: string; accountId: string }
 interface Pending { op: string; resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 interface BridgeState {
- status: ChatGPTStatus; stamp: Stamp; models: Model<"openai-responses">[]; catalogAccount: string | null;
+ status: ChatGPTStatus; stamp: Stamp; models: Model<"openai-responses">[]; catalogAccount: string | null; catalogError: string | null;
  pending: Map<string, Pending>; controllers: Map<AbortController, boolean>; listeners: Set<() => void>; counter: number; catalogRequest: number;
 }
 const key = Symbol.for("lh.chatgpt.bridge");
@@ -25,7 +35,7 @@ function runtimeConnected(): boolean { return desktopIPCConnected() || webSubscr
 function bridge(): BridgeState {
  const global = globalThis as typeof globalThis & { [key]?: BridgeState };
  if (!global[key]) {
-  const state: BridgeState = { status: unavailable(), stamp: { epoch: 0, authorityRevision: 0, revision: 0 }, models: [], catalogAccount: null, pending: new Map(), controllers: new Map(), listeners: new Set(), counter: 0, catalogRequest: 0 };
+  const state: BridgeState = { status: unavailable(), stamp: { epoch: 0, authorityRevision: 0, revision: 0 }, models: [], catalogAccount: null, catalogError: null, pending: new Map(), controllers: new Map(), listeners: new Set(), counter: 0, catalogRequest: 0 };
   global[key] = state;
   const receive = (raw: unknown) => {
    const m = raw as { channel?: string; kind?: string; id?: string; op?: string; ok?: boolean; value?: unknown; stamp: Stamp; status: ChatGPTStatus; invalidate?: string; error?: string };
@@ -59,7 +69,7 @@ function bridge(): BridgeState {
  }
  return global[key];
 }
-function clearCatalog(state: BridgeState) { state.models = []; state.catalogAccount = null; }
+function clearCatalog(state: BridgeState) { state.models = []; state.catalogAccount = null; state.catalogError = null; }
 function acceptStatus(state: BridgeState, value: StatusValue) {
  if (!validStamp(value) || value.revision < state.stamp.revision) return;
  if (value.epoch !== state.stamp.epoch || value.authorityRevision !== state.stamp.authorityRevision || value.status.activeId !== state.status.activeId) clearCatalog(state);
@@ -84,6 +94,10 @@ export function chatGPTConnected(): boolean { const s = chatGPTStatus(); return 
 export function chatGPTBackgroundAllowed(): boolean { const s = chatGPTStatus(); return chatGPTConnected() && s.allowBackgroundUse === true; }
 export function onChatGPTChange(listener: () => void): () => void { bridge().listeners.add(listener); return () => { bridge().listeners.delete(listener); }; }
 export function chatGPTModels(): Model<"openai-responses">[] { return bridge().models; }
+export function chatGPTCatalogError(): string | null {
+ const state = bridge();
+ return state.status.catalogError ?? state.catalogError;
+}
 export function chatGPTModel(id: string): Model<"openai-responses"> | undefined { return chatGPTModels().find((m) => m.id === id); }
 export function chatGPTScope(selectedModelId: string): AdmissionScope {
  const state = bridge();
@@ -111,7 +125,26 @@ export async function chatGPTDenial(scope: AdmissionScope | undefined, controlle
  if (controller.signal.reason === "all" || !chatGPTScopeCurrent(scope)) return "all";
  return !chatGPTBackgroundAllowed() ? "background" : "other";
 }
-/** Preserve account order; unknown capabilities/windows are never fabricated. */
+const DEFAULT_SYNTH_CONTEXT_WINDOW = 128_000;
+const DEFAULT_SYNTH_MAX_TOKENS = 16_384;
+const THINKING_LEVEL_KEYS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+function buildThinkingLevelMap(levels: readonly string[] | undefined): Partial<Record<ThinkingLevel, string | null>> | undefined {
+ if (!levels || levels.length === 0) return undefined;
+ const normalized = new Set(levels.map((l) => l.toLowerCase()));
+ const map: Partial<Record<ThinkingLevel, string | null>> = {};
+ for (const level of THINKING_LEVEL_KEYS) {
+  if (level === "off") {
+   map.off = normalized.has("none") ? "none" : normalized.has("off") ? "off" : null;
+  } else {
+   map[level] = normalized.has(level) ? level : null;
+  }
+ }
+ return map;
+}
+
+/** Merge live /v1/models metadata with pi-ai capabilities, synthesizing valid
+ * openai-responses models for newly released slugs instead of dropping them. */
 export async function refreshChatGPTModels(supported: Model<"openai-responses">[]): Promise<void> {
  const state = bridge();
  if (!runtimeConnected()) { clearCatalog(state); return; }
@@ -121,12 +154,54 @@ export async function refreshChatGPTModels(supported: Model<"openai-responses">[
   if (sequence !== state.catalogRequest || !validStamp(value)) return;
   acceptStatus(state, value);
   if (value.epoch !== state.stamp.epoch || value.authorityRevision !== state.stamp.authorityRevision || value.accountId !== state.status.activeId || !chatGPTConnected()) return;
+  state.catalogError = value.status.catalogError ?? null;
+  if (value.models.length === 0 && value.status.catalogError && state.models.length > 0 && state.catalogAccount === value.accountId) {
+   return;
+  }
   state.catalogAccount = value.accountId;
-  state.models = value.models.flatMap((entry) => {
+  state.models = value.models.map((entry) => {
    const known = supported.find((m) => m.id === entry.id && m.api === "openai-responses");
-   return known ? [{ ...known, provider: "chatgpt", name: entry.name, headers: undefined, samplingParams: undefined, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] : [];
+   const thinkingLevelMap = buildThinkingLevelMap(entry.supportedReasoningLevels);
+   if (known) {
+    return {
+     ...known,
+     provider: "chatgpt",
+     name: entry.name,
+     ...(entry.contextWindow ? { contextWindow: entry.contextWindow } : {}),
+     ...(entry.maxTokens ? { maxTokens: entry.maxTokens } : {}),
+     ...(entry.input ? { input: entry.input } : {}),
+     ...(entry.reasoning !== undefined ? { reasoning: entry.reasoning } : {}),
+     ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+     headers: undefined,
+     samplingParams: undefined,
+     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    };
+   }
+   const reasoning = entry.reasoning ?? Boolean(entry.supportedReasoningLevels && entry.supportedReasoningLevels.length > 0);
+   return {
+    id: entry.id,
+    name: entry.name,
+    api: "openai-responses",
+    provider: "chatgpt",
+    baseUrl: "https://api.openai.com/v1",
+    reasoning,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+    input: entry.input ?? ["text"],
+    contextWindow: entry.contextWindow ?? DEFAULT_SYNTH_CONTEXT_WINDOW,
+    maxTokens: entry.maxTokens ?? DEFAULT_SYNTH_MAX_TOKENS,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    compat: { supportsDeveloperRole: true },
+   };
   });
- } catch { if (sequence === state.catalogRequest) clearCatalog(state); }
+ } catch {
+  if (sequence === state.catalogRequest) {
+   if (!chatGPTConnected() || state.catalogAccount !== state.status.activeId) {
+    clearCatalog(state);
+   } else {
+    state.catalogError = state.status.catalogError ?? "The ChatGPT account model catalog is unavailable.";
+   }
+  }
+ }
 }
 export function chatGPTAbortController(background = true): { controller: AbortController; release: () => void } {
  const state = bridge(); const controller = new AbortController(); state.controllers.set(controller, background);

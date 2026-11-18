@@ -52,12 +52,33 @@ function validateState(state) {
 
 /** Private, unencrypted JSON outside learning data. No OS credential-store access. */
 function fileStore(file) {
+	let lastStamp = null;
+	const captureStamp = async () => {
+		try {
+			const stat = await fs.stat(file);
+			lastStamp = { mtimeMs: stat.mtimeMs, ino: stat.ino, size: stat.size };
+		} catch (err) {
+			if (err.code === "ENOENT") lastStamp = null;
+		}
+	};
 	return {
+		async changedExternally() {
+			try {
+				const stat = await fs.stat(file);
+				if (!lastStamp) return true;
+				return stat.mtimeMs !== lastStamp.mtimeMs || stat.ino !== lastStamp.ino || stat.size !== lastStamp.size;
+			} catch (err) {
+				if (err.code === "ENOENT") return lastStamp !== null;
+				return false;
+			}
+		},
 		async read() {
 			try {
-				return validateState(JSON.parse(await fs.readFile(file, "utf8")));
+				const raw = await fs.readFile(file, "utf8");
+				await captureStamp();
+				return validateState(JSON.parse(raw));
 			} catch (err) {
-				if (err.code === "ENOENT") return null;
+				if (err.code === "ENOENT") { lastStamp = null; return null; }
 				throw fail("storage");
 			}
 		},
@@ -73,6 +94,7 @@ function fileStore(file) {
 				await handle.close();
 				handle = null;
 				await fs.rename(temp, file);
+				await captureStamp();
 				// Directory fsync is supported on Unix; the file fsync above is mandatory.
 				if (process.platform !== "win32") {
 					const dir = await fs.open(path.dirname(file), "r");
@@ -248,7 +270,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 		return json(TOKEN, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ ...fields, resource: RESOURCE }), signal });
 	}
 
-	async function login(accountId) {
+	async function beginAuthAttempt(accountId, { headless = false } = {}) {
 		await ready();
 		if (pending) throw fail("pending");
 		if (paused) throw fail("disconnected");
@@ -273,7 +295,89 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			finish();
 			notify();
 		};
-		pending = { abort, cancel };
+		let redirectUri = "";
+		async function processParams(params, throwOnError = false) {
+			try {
+				if (params.has("error")) throw fail(params.get("error") === "access_denied" ? "cancelled" : "identity");
+				const clientId = params.get("client_id") || selected?.clientId;
+				if (!clientId || clientId === "dynamic_agent_client" || clientId.length > 512 || /[\s\x00-\x1f]/.test(clientId) || (selected && clientId !== selected.clientId) || !params.get("code")) throw fail("identity");
+				let body;
+				try { body = await grant({ grant_type: "authorization_code", client_id: clientId, code: params.get("code"), code_verifier: verifier, redirect_uri: redirectUri }, AbortSignal.any([abort.signal, AbortSignal.timeout(15000)])); }
+				catch (err) {
+					if (err.oauthCode === "invalid_grant" && !selected?.subject) retryRegistration = { clientId };
+					throw err;
+				}
+				if (typeof body.id_token !== "string") throw fail("identity");
+				const verified = await identity(body.id_token, clientId, nonce, selected?.subject);
+				const tokens = tokenSet(body);
+				await serial(async () => {
+					if (closed || abort.signal.aborted || epoch !== attemptEpoch) throw fail("cancelled");
+					const existing = state.registrations.find((r) => r.clientId === clientId);
+					if (existing && existing.subject !== verified.subject) throw fail("identity");
+					const record = { id: existing?.id ?? crypto.randomUUID(), clientId, issuer: ISSUER, ...verified, tokens };
+					const next = structuredClone(state);
+					next.registrations = next.registrations.filter((r) => r.id !== record.id).concat(record);
+					next.activeId = record.id;
+					const previous = structuredClone(state);
+					await save(next); // Active identity changes only AFTER validation and durable persistence.
+					if (closed || abort.signal.aborted || epoch !== attemptEpoch) {
+						await save(previous);
+						throw fail("cancelled");
+					}
+					stop();
+					storageDenied = false;
+					suspended = false;
+					retryRegistration = undefined;
+				});
+				lastError = planScopes(tokens) ? null : publicError(fail("scope"));
+			} catch (err) {
+				if (!abort.signal.aborted) lastError = publicError(err);
+				if (throwOnError) throw err;
+			} finally {
+				if (pending?.abort === abort) pending = null;
+				finish();
+				notify();
+			}
+		}
+		const parseHeadlessInput = (rawInput) => {
+			if (typeof rawInput !== "string" || !rawInput.trim()) {
+				throw new Error("Paste the redirect URL or authorization code.");
+			}
+			const trimmed = rawInput.trim();
+			let params;
+			if (/^https?:\/\//i.test(trimmed)) {
+				let parsed;
+				try { parsed = new URL(trimmed); } catch { throw new Error("Invalid redirect URL."); }
+				if (parsed.pathname !== "/auth/callback") {
+					throw new Error("Redirect URL must end with /auth/callback.");
+				}
+				params = parsed.searchParams;
+			} else if (trimmed.startsWith("?") || /(?:^|&)code=/.test(trimmed)) {
+				params = new URLSearchParams(trimmed.startsWith("?") ? trimmed.slice(1) : trimmed);
+			} else {
+				const knownClientId = selected?.clientId || retryRegistration?.clientId;
+				if (!knownClientId) {
+					throw new Error("First-time sign-in requires the full redirect URL (including state and client_id).");
+				}
+				params = new URLSearchParams({ code: trimmed, state: expectedState, client_id: knownClientId });
+			}
+			if (["state", "code", "client_id", "error"].some((key) => params.getAll(key).length > 1) || params.get("state") !== expectedState) {
+				throw new Error("Sign-in state could not be verified. Check that you pasted the full redirect URL from this attempt.");
+			}
+			if (!params.get("error") && !params.get("code")) {
+				throw new Error("Redirect URL is missing the authorization code.");
+			}
+			return params;
+		};
+		const submit = async (callbackUrlOrCode) => {
+			if (consumed || abort.signal.aborted) throw fail("cancelled");
+			const params = parseHeadlessInput(callbackUrlOrCode);
+			consumed = true;
+			cleanup();
+			await processParams(params, false);
+			return snapshot();
+		};
+		pending = { abort, cancel, headless, submit };
 		lastError = null;
 		notify();
 		try {
@@ -281,7 +385,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				listener.once("error", reject);
 				listener.listen(0, "127.0.0.1", resolve);
 			});
-			const redirectUri = `http://127.0.0.1:${listener.address().port}/auth/callback`;
+			redirectUri = `http://127.0.0.1:${listener.address().port}/auth/callback`;
 			listener.on("request", async (req, res) => {
 				let callback;
 				try { callback = new URL(req.url || "/", redirectUri); }
@@ -296,41 +400,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				consumed = true;
 				res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end("Return to LearnHarness to view the sign-in result. You may close this tab.");
 				cleanup();
-				try {
-					if (params.has("error")) throw fail(params.get("error") === "access_denied" ? "cancelled" : "identity");
-					const clientId = params.get("client_id") || selected?.clientId;
-					if (!clientId || clientId === "dynamic_agent_client" || clientId.length > 512 || /[\s\x00-\x1f]/.test(clientId) || (selected && clientId !== selected.clientId) || !params.get("code")) throw fail("identity");
-					let body;
-					try { body = await grant({ grant_type: "authorization_code", client_id: clientId, code: params.get("code"), code_verifier: verifier, redirect_uri: redirectUri }, AbortSignal.any([abort.signal, AbortSignal.timeout(15000)])); }
-					catch (err) {
-						if (err.oauthCode === "invalid_grant" && !selected?.subject) retryRegistration = { clientId };
-						throw err;
-					}
-					if (typeof body.id_token !== "string") throw fail("identity");
-					const verified = await identity(body.id_token, clientId, nonce, selected?.subject);
-					const tokens = tokenSet(body);
-					await serial(async () => {
-						if (closed || abort.signal.aborted || epoch !== attemptEpoch) throw fail("cancelled");
-						const existing = state.registrations.find((r) => r.clientId === clientId);
-						if (existing && existing.subject !== verified.subject) throw fail("identity");
-						const record = { id: existing?.id ?? crypto.randomUUID(), clientId, issuer: ISSUER, ...verified, tokens };
-						const next = structuredClone(state);
-						next.registrations = next.registrations.filter((r) => r.id !== record.id).concat(record);
-						next.activeId = record.id;
-						const previous = structuredClone(state);
-						await save(next); // Active identity changes only AFTER validation and durable persistence.
-						if (closed || abort.signal.aborted || epoch !== attemptEpoch) {
-							await save(previous);
-							throw fail("cancelled");
-						}
-						stop();
-						storageDenied = false;
-						suspended = false;
-						retryRegistration = undefined;
-					});
-					lastError = planScopes(tokens) ? null : publicError(fail("scope"));
-				} catch (err) { if (!abort.signal.aborted) lastError = publicError(err); }
-				finally { if (pending?.abort === abort) pending = null; finish(); notify(); }
+				await processParams(params, false);
 			});
 			timer = setTimeout(() => cancel("timeout"), timeoutMs);
 			const url = new URL(AUTHORIZE);
@@ -344,10 +414,59 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				state: expectedState, nonce, code_challenge_method: "S256",
 				code_challenge: crypto.createHash("sha256").update(verifier).digest("base64url"),
 			}).toString();
-			await openExternal(url.toString()); // Trusted main only. Never return this URL to the renderer.
-		} catch (err) { cancel(err.code || "network"); }
-		void completion;
-		return snapshot();
+			if (!headless) {
+				await openExternal(url.toString()); // Trusted main only. Never return this URL to the renderer.
+			}
+			void completion;
+			if (headless) {
+				return { authorizeUrl: url.toString(), redirectUri, status: snapshot() };
+			}
+			return snapshot();
+		} catch (err) {
+			cancel(err.code || "network");
+			if (headless) throw err;
+			void completion;
+			return snapshot();
+		}
+	}
+	async function login(accountId) {
+		return beginAuthAttempt(accountId, { headless: false });
+	}
+	async function startHeadlessAuth(accountId) {
+		return beginAuthAttempt(accountId, { headless: true });
+	}
+	async function completeHeadlessAuth(callbackUrlOrCode) {
+		if (!pending || typeof pending.submit !== "function") {
+			throw new Error("No headless ChatGPT sign-in is pending.");
+		}
+		return pending.submit(callbackUrlOrCode);
+	}
+	async function reload() {
+		if (closed || storageDenied || pending) return snapshot();
+		if (!init) {
+			await ready();
+			return snapshot();
+		}
+		if (typeof store.changedExternally === "function") {
+			if (!(await store.changedExternally())) return snapshot();
+		}
+		return serial(async () => {
+			if (closed || storageDenied || pending) return snapshot();
+			try {
+				const loaded = await store.read();
+				const next = loaded ? validateState(loaded) : null;
+				if (next && JSON.stringify(next) !== JSON.stringify(state)) {
+					state = next;
+					stop();
+					suspended = false;
+					lastError = null;
+					notify("all");
+				}
+			} catch (err) {
+				denyStorage(err);
+			}
+			return snapshot();
+		});
 	}
 	function cancelLogin() { pending?.cancel(); return snapshot(); }
 
@@ -412,6 +531,25 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 		if (typeof background !== "boolean" || !expected || !nonempty(expected.expectedAccountId) || !Number.isSafeInteger(expected.expectedAuthorityRevision) || !nonempty(expected.selectedModelId)) throw fail("catalog");
 		return credential(background, expected);
 	}
+	const positiveInt = (...values) => {
+		for (const v of values) {
+			if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+		}
+		return undefined;
+	};
+	const parseInputModalities = (m) => {
+		const raw = m.input_modalities ?? m.modalities ?? m.supported_modalities ?? m.capabilities;
+		if (!Array.isArray(raw) || raw.length === 0) return undefined;
+		return raw.some((v) => typeof v === "string" && /image|vision/i.test(v)) ? ["text", "image"] : ["text"];
+	};
+	const parseReasoningLevels = (m) => {
+		const raw = m.supported_reasoning_levels ?? m.reasoning_levels;
+		if (!Array.isArray(raw)) return undefined;
+		const levels = raw
+			.map((item) => (typeof item === "string" ? item : item && typeof item.effort === "string" ? item.effort : null))
+			.filter((v) => typeof v === "string" && v.length > 0);
+		return levels.length > 0 ? levels : undefined;
+	};
 	const modelValue = () => ({ ...stamp(), status: snapshot(), accountId: active()?.id ?? null, models: catalog });
 	async function models() {
 		const sequence = ++catalogSequence;
@@ -423,7 +561,23 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			const body = await json(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
 			authorized(false, undefined, token.epoch);
 			if (sequence !== catalogSequence || active()?.id !== token.accountId || !Array.isArray(body.models)) throw fail("catalog");
-			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({ id: m.slug, name: m.display_name }));
+			const visible = body.models
+				.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string")
+				.map((m) => {
+					const entry = { id: m.slug, name: m.display_name };
+					const contextWindow = positiveInt(m.context_length, m.context_window, m.max_context_length, m.max_input_tokens);
+					if (contextWindow !== undefined) entry.contextWindow = contextWindow;
+					const maxTokens = positiveInt(m.max_output_tokens, m.max_tokens);
+					if (maxTokens !== undefined) entry.maxTokens = maxTokens;
+					const input = parseInputModalities(m);
+					if (input !== undefined) entry.input = input;
+					const supportedReasoningLevels = parseReasoningLevels(m);
+					if (typeof m.reasoning === "boolean") entry.reasoning = m.reasoning;
+					else if (typeof m.supports_reasoning === "boolean") entry.reasoning = m.supports_reasoning;
+					else if (supportedReasoningLevels) entry.reasoning = true;
+					if (supportedReasoningLevels !== undefined) entry.supportedReasoningLevels = supportedReasoningLevels;
+					return entry;
+				});
 			const changed = JSON.stringify(visible) !== JSON.stringify(catalog);
 			catalog = visible;
 			if (changed) authorityRevision++;
@@ -432,7 +586,10 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			return modelValue();
 		} catch {
 			if (sequence === catalogSequence) {
-				if (catalog.length) { catalog = []; authorityRevision++; }
+				const acc = active();
+				if (!acc || !planScopes(acc.tokens)) {
+					if (catalog.length) { catalog = []; authorityRevision++; }
+				}
 				catalogError = publicError(fail("catalog")); notify();
 			}
 			return modelValue();
@@ -536,7 +693,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	function close() { closed = true; pending?.cancel(); stop(); }
 	function pause() { paused = true; pending?.cancel(); stop(); notify(); }
 	function resume() { paused = false; if (!storageDenied) suspended = false; notify(); }
-	return { status, login, cancelLogin, lease, models, select, consent, disconnect, logout, close, pause, resume, stamp };
+	return { status, login, startHeadlessAuth, completeHeadlessAuth, reload, cancelLogin, lease, models, select, consent, disconnect, logout, close, pause, resume, stamp };
 }
 
 module.exports = { createChatGPT, fileStore, publicError, allowedAuthEndpoint, SCOPES, validateState };

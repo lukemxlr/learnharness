@@ -53,11 +53,16 @@ const usage = { input_tokens: 10, output_tokens: 4, total_tokens: 14, input_toke
 const complete = (output: unknown[] = []) => ({ type: "response.completed", response: { id: "resp_scratch", status: "completed", output, usage } });
 const context = () => normalizeContext({ systemPrompt: "Scratch teacher instructions", messages: [{ role: "user", content: [{ type: "text", text: "Scratch learning material" }, { type: "image", data: "c2NyYXRjaA==", mimeType: "image/png" }], timestamp: 1 }], tools: [{ name: "scratch_tool", description: "Scratch local tool", parameters: Type.Object({ value: Type.String() }) }] });
 
-test("catalog intersects supported capabilities, without inventing model limits", () => {
-	assert.equal(chatGPTModels().length, 1);
+test("catalog merges supported capabilities and synthesizes new /v1/models slugs", () => {
+	assert.equal(chatGPTModels().length, 2);
 	assert.equal(chatGPTModels()[0]!.provider, "chatgpt");
 	assert.equal(chatGPTModels()[0]!.contextWindow, model.contextWindow);
 	assert.deepEqual(chatGPTModels()[0]!.input, model.input);
+	assert.equal(chatGPTModels()[1]!.id, "unknown-capabilities");
+	assert.equal(chatGPTModels()[1]!.provider, "chatgpt");
+	assert.equal(chatGPTModels()[1]!.api, "openai-responses");
+	assert.equal(chatGPTModels()[1]!.contextWindow, 128_000);
+	assert.deepEqual(chatGPTModels()[1]!.input, ["text"]);
 });
 
 test("alias resolves only OAuth; native Responses body is stateless/namespaced, image/history preserved and logical output retained", async () => {

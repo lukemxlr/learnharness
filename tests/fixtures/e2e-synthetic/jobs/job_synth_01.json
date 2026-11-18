@@ -1,0 +1,25 @@
+{
+	"id": "job_synth_01",
+	"kind": "pdf",
+	"chatId": "chat_synth_teach_01",
+	"toolCallId": "call_synth_pdf_01",
+	"input": {
+		"path": "C:\\Users\\Synth\\Notes\\kinematics.pdf",
+		"question": "Extract the projectile trajectory equation from page 2"
+	},
+	"delivery": {
+		"kind": "result",
+		"status": "delivered"
+	},
+	"status": "done",
+	"activity": "pdf_read: page 2",
+	"createdAt": "2026-11-10T09:14:00.000Z",
+	"updatedAt": "2026-11-10T09:14:15.000Z",
+	"result": {
+		"path": "C:\\Users\\Synth\\Notes\\kinematics.pdf",
+		"question": "Extract the projectile trajectory equation from page 2",
+		"brief": "Trajectory equation on page 2: y = x*tan(theta) - g*x^2/(2*v0^2*cos^2(theta)).",
+		"pagesRead": [2],
+		"pagesConsulted": [1, 2]
+	}
+}

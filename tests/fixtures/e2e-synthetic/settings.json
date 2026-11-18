@@ -1,0 +1,67 @@
+{
+	"version": 1,
+	"general": {
+		"autoUpdate": false
+	},
+	"agent": {
+		"workerRequestConcurrency": 4,
+		"fileAccess": {
+			"restricted": false,
+			"folders": [
+				"C:\\Users\\Synth\\Notes",
+				"/srv/synth/notes"
+			]
+		}
+	},
+	"customProvider": {
+		"baseUrl": "http://127.0.0.1:4000/v1",
+		"authMode": "keyless",
+		"models": [
+			{
+				"id": "gpt-test-1",
+				"image": true,
+				"reasoning": true,
+				"context": 128000,
+				"maxTokens": 8192
+			}
+		]
+	},
+	"models": {
+		"strong": {
+			"model": {
+				"provider": "custom",
+				"id": "gpt-test-1"
+			},
+			"thinkingLevel": "low"
+		},
+		"cheap": {
+			"model": {
+				"provider": "custom",
+				"id": "gpt-test-1"
+			},
+			"thinkingLevel": "low"
+		},
+		"vision": {
+			"model": {
+				"provider": "custom",
+				"id": "gpt-test-1"
+			},
+			"thinkingLevel": "low"
+		}
+	},
+	"appearance": {
+		"theme": "default",
+		"proseFontSize": 16,
+		"codeLigatures": false,
+		"sessionNameSerif": true
+	},
+	"graph": {
+		"enabled": true,
+		"rendering": true,
+		"extractionChunkTokens": 4096
+	},
+	"compaction": {
+		"thresholdTokens": 150000,
+		"includeReasoning": false
+	}
+}

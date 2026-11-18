@@ -1,0 +1,145 @@
+{
+	"id": "chat_synth_teach_01",
+	"title": "Triangle Angle Sum",
+	"createdAt": "2026-11-01T10:00:00.000Z",
+	"updatedAt": "2026-11-01T10:05:00.000Z",
+	"version": 2,
+	"settings": {
+		"model": {
+			"provider": "custom",
+			"id": "test-model-vision"
+		}
+	},
+	"tree": {
+		"activeNodeId": "plan_tri_1",
+		"nodes": [
+			{
+				"id": "plan_tri_1",
+				"title": "Interior Angles of a Triangle",
+				"status": "in_progress",
+				"children": []
+			}
+		]
+	},
+	"messages": [
+		{
+			"id": "msg_synth_u1",
+			"role": "user",
+			"content": [
+				{
+					"type": "text",
+					"text": "Explain why the interior angles of a Euclidean triangle sum to 180 degrees."
+				}
+			],
+			"timestamp": 1761991200000
+		},
+		{
+			"id": "msg_synth_a1",
+			"role": "assistant",
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "test-model-vision",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "call_synth_probe_1",
+					"name": "probe_done",
+					"arguments": {
+						"summary": "Learner knows parallel lines and alternate interior angles."
+					}
+				}
+			],
+			"stopReason": "toolUse",
+			"usage": {
+				"input": 100,
+				"output": 20,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 120,
+				"cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+			},
+			"timestamp": 1761991210000
+		},
+		{
+			"id": "msg_synth_tr1",
+			"role": "toolResult",
+			"toolCallId": "call_synth_probe_1",
+			"toolName": "probe_done",
+			"isError": false,
+			"content": [
+				{
+					"type": "text",
+					"text": "{\"ok\":true}"
+				}
+			],
+			"timestamp": 1761991211000
+		},
+		{
+			"id": "msg_synth_a2",
+			"role": "assistant",
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "test-model-vision",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "call_synth_quiz_1",
+					"name": "quiz",
+					"arguments": {
+						"nodeId": "plan_tri_1",
+						"question": "If two angles of a triangle are 50 and 60 degrees, what is the third angle?",
+						"options": ["60 degrees", "70 degrees", "80 degrees"],
+						"correctIndex": 1
+					}
+				}
+			],
+			"stopReason": "toolUse",
+			"usage": {
+				"input": 120,
+				"output": 30,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 150,
+				"cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+			},
+			"timestamp": 1761991220000
+		},
+		{
+			"id": "msg_synth_tr2",
+			"role": "toolResult",
+			"toolCallId": "call_synth_quiz_1",
+			"toolName": "quiz",
+			"isError": false,
+			"content": [
+				{
+					"type": "text",
+					"text": "Selected: 70 degrees"
+				}
+			],
+			"timestamp": 1761991230000
+		},
+		{
+			"id": "msg_synth_a3",
+			"role": "assistant",
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "test-model-vision",
+			"content": [
+				{
+					"type": "text",
+					"text": "Correct! Since 50 + 60 + 70 = 180 degrees, the third angle is 70 degrees."
+				}
+			],
+			"stopReason": "stop",
+			"usage": {
+				"input": 140,
+				"output": 25,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 165,
+				"cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+			},
+			"timestamp": 1761991240000
+		}
+	]
+}

@@ -1,0 +1,42 @@
+{
+	"version": 1,
+	"customProvider": {
+		"baseUrl": "http://127.0.0.1:4000/v1",
+		"authMode": "keyless",
+		"models": [
+			{
+				"id": "test-model-vision",
+				"image": true,
+				"reasoning": true,
+				"context": 128000,
+				"maxTokens": 8192
+			}
+		]
+	},
+	"models": {
+		"strong": {
+			"model": {
+				"provider": "custom",
+				"id": "test-model-vision"
+			}
+		},
+		"cheap": {
+			"model": {
+				"provider": "custom",
+				"id": "test-model-vision"
+			}
+		},
+		"vision": {
+			"model": {
+				"provider": "custom",
+				"id": "test-model-vision"
+			}
+		}
+	},
+	"agent": {
+		"fileAccess": {
+			"restricted": false,
+			"folders": []
+		}
+	}
+}

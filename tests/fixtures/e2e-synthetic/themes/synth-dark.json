@@ -1,0 +1,18 @@
+{
+	"name": "Synth Dark",
+	"mode": "dark",
+	"colors": {
+		"background": "#0f172a",
+		"accent": "#38bdf8",
+		"surface": "#1e293b",
+		"bold": "#f8fafc",
+		"border": "#334155",
+		"italic": "#cbd5e1",
+		"text": "#f1f5f9",
+		"code": "#7dd3fc",
+		"textMuted": "#94a3b8",
+		"error": "#f87171",
+		"success": "#4ade80",
+		"warning": "#fbbf24"
+	}
+}

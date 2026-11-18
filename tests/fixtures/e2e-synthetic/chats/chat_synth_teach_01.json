@@ -1,0 +1,248 @@
+{
+	"id": "chat_synth_teach_01",
+	"title": "Kinematics & Projectile Vectors",
+	"createdAt": "2026-11-10T09:00:00.000Z",
+	"updatedAt": "2026-11-10T09:15:00.000Z",
+	"version": 2,
+	"settings": {
+		"model": {
+			"provider": "custom",
+			"id": "gpt-test-1"
+		},
+		"thinkingLevel": "low"
+	},
+	"tree": {
+		"version": 1,
+		"nodes": [
+			{
+				"id": "vector-decomposition",
+				"title": "Vector Decomposition",
+				"summary": "Split initial velocity into orthogonal horizontal and vertical components."
+			},
+			{
+				"id": "parabolic-trajectory",
+				"title": "Parabolic Trajectory",
+				"summary": "Combine uniform horizontal motion with constant vertical gravitational acceleration."
+			}
+		],
+		"edges": [
+			{
+				"from": "vector-decomposition",
+				"to": "parabolic-trajectory"
+			}
+		]
+	},
+	"imageSnapshots": {
+		"1111111111111111111111111111111111111111111111111111111111111111": {
+			"mimeType": "image/png",
+			"data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+			"width": 1,
+			"height": 1
+		}
+	},
+	"messages": [
+		{
+			"id": "msg_synth_t01_01",
+			"role": "user",
+			"content": "Teach me projectile motion and vector decomposition using `C:\\Users\\Synth\\Notes\\vector.png` and C:\\Users\\Synth\\Notes\\missing.png.",
+			"timestamp": 1794301200000
+		},
+		{
+			"id": "msg_synth_t01_02",
+			"role": "assistant",
+			"content": [
+				{
+					"type": "text",
+					"text": "Let us decompose an initial launch velocity v0 at angle theta into vx = v0 cos(theta) and vy = v0 sin(theta)."
+				},
+				{
+					"type": "toolCall",
+					"id": "call_synth_img_01",
+					"name": "show_image",
+					"arguments": {
+						"path": "C:\\Users\\Synth\\Notes\\vector.png",
+						"caption": "Synthetic projectile velocity vector diagram"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "call_synth_img_missing",
+					"name": "show_image",
+					"arguments": {
+						"path": "C:\\Users\\Synth\\Notes\\missing.png",
+						"caption": "Intentional missing image reference for migration diagnostics"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "call_synth_pdf_01",
+					"name": "pdf",
+					"arguments": {
+						"path": "\\\\srv\\docs\\kinematics.pdf",
+						"question": "Extract the projectile trajectory equation from page 2"
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "gpt-test-1",
+			"usage": {
+				"input": 120,
+				"output": 85,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 205,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 1794301210000
+		},
+		{
+			"id": "msg_synth_t01_03",
+			"role": "toolResult",
+			"toolCallId": "call_synth_img_01",
+			"toolName": "show_image",
+			"content": [
+				{
+					"type": "text",
+					"text": "Displayed C:\\Users\\Synth\\Notes\\vector.png"
+				}
+			],
+			"details": {
+				"path": "C:\\Users\\Synth\\Notes\\vector.png",
+				"caption": "Synthetic projectile velocity vector diagram",
+				"mimeType": "image/png",
+				"snapshotId": "1111111111111111111111111111111111111111111111111111111111111111",
+				"width": 1,
+				"height": 1
+			},
+			"isError": false,
+			"timestamp": 1794301211000
+		},
+		{
+			"id": "msg_synth_t01_04",
+			"role": "toolResult",
+			"toolCallId": "call_synth_img_missing",
+			"toolName": "show_image",
+			"content": [
+				{
+					"type": "text",
+					"text": "Displayed C:\\Users\\Synth\\Notes\\missing.png"
+				}
+			],
+			"details": {
+				"path": "C:\\Users\\Synth\\Notes\\missing.png",
+				"caption": "Intentional missing image reference for migration diagnostics",
+				"mimeType": "image/png",
+				"snapshotId": "1111111111111111111111111111111111111111111111111111111111111111",
+				"width": 1,
+				"height": 1
+			},
+			"isError": false,
+			"timestamp": 1794301212000
+		},
+		{
+			"id": "msg_synth_t01_05",
+			"role": "toolResult",
+			"toolCallId": "call_synth_pdf_01",
+			"toolName": "pdf",
+			"content": [
+				{
+					"type": "text",
+					"text": "Dispatched PDF reader for \\\\srv\\docs\\kinematics.pdf"
+				}
+			],
+			"details": {
+				"path": "\\\\srv\\docs\\kinematics.pdf",
+				"question": "Extract the projectile trajectory equation from page 2",
+				"brief": "Trajectory equation on page 2: y = x*tan(theta) - g*x^2/(2*v0^2*cos^2(theta)).",
+				"pagesRead": [2],
+				"pagesConsulted": [1, 2]
+			},
+			"isError": false,
+			"timestamp": 1794301213000
+		},
+		{
+			"id": "msg_synth_t01_06",
+			"role": "assistant",
+			"content": [
+				{
+					"type": "text",
+					"text": "Because horizontal acceleration ax = 0 and vertical acceleration ay = -g, the trajectory forms a parabola."
+				}
+			],
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "gpt-test-1",
+			"usage": {
+				"input": 180,
+				"output": 45,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 225,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "stop",
+			"timestamp": 1794301220000
+		}
+	],
+	"turns": [
+		{
+			"id": "turn_synth_01",
+			"messageId": "msg_synth_t01_06",
+			"at": "2026-11-10T09:15:00.000Z",
+			"model": "custom:gpt-test-1",
+			"steps": [
+				{
+					"inputTokens": 180,
+					"outputTokens": 45,
+					"cacheReadTokens": 0,
+					"cacheWriteTokens": 0,
+					"reasoningTokens": 0
+				}
+			]
+		}
+	],
+	"sideChats": [
+		{
+			"id": "side_synth_01",
+			"anchor": {
+				"messageId": "msg_synth_t01_06",
+				"partId": "msg_synth_t01_06-t0",
+				"blockIndex": 0,
+				"blockText": "Because horizontal acceleration ax = 0 and vertical acceleration ay = -g, the trajectory forms a parabola."
+			},
+			"open": false,
+			"createdAt": "2026-11-10T09:16:00.000Z",
+			"messages": [
+				{
+					"id": "smsg_synth_01",
+					"role": "user",
+					"text": "Does air resistance change the horizontal velocity?",
+					"at": "2026-11-10T09:16:00.000Z"
+				},
+				{
+					"id": "smsg_synth_02",
+					"role": "assistant",
+					"text": "Yes, drag introduces horizontal deceleration opposing motion, breaking exact symmetry.",
+					"at": "2026-11-10T09:16:05.000Z",
+					"model": "custom:gpt-test-1"
+				}
+			]
+		}
+	]
+}

@@ -746,6 +746,7 @@ async function main() {
 	// child is the only recipient of credential leases over inherited IPC.
 	ipcMain.handle("lh:chatgpt:control", async (event, command) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return { error: "Untrusted desktop request." };
+		if (command?.op === "start-headless" || command?.op === "complete-headless") return { error: "Headless ChatGPT sign-in is unavailable in desktop mode." };
 		if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections." };
 		return chatGPTControl(command, chatgpt);
 	});

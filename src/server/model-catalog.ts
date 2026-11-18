@@ -21,15 +21,73 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
-import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { chatGPTCatalogError, chatGPTConnected, chatGPTModel, chatGPTModels, onChatGPTChange, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
-import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
+import { subscribe } from "../core/events.ts";
+import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, onNativeSubscriptionChange, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
-export async function refreshConnectionCatalog(provider?: string): Promise<void> {
-	await Promise.all([
-		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+const DEFAULT_CATALOG_TTL_MS = 5 * 60 * 1000;
+const CATALOG_CACHE_KEY = Symbol.for("lh.modelCatalog.refreshCache");
+
+interface CatalogRefreshCache {
+	lastRefreshedAt: Map<string, number>;
+	inflight: Map<string, Promise<void>>;
+	subscribed: boolean;
+}
+
+function getCatalogRefreshCache(): CatalogRefreshCache {
+	const g = globalThis as typeof globalThis & { [CATALOG_CACHE_KEY]?: CatalogRefreshCache };
+	if (!g[CATALOG_CACHE_KEY]) {
+		const cache: CatalogRefreshCache = {
+			lastRefreshedAt: new Map(),
+			inflight: new Map(),
+			subscribed: false,
+		};
+		g[CATALOG_CACHE_KEY] = cache;
+		onChatGPTChange(() => cache.lastRefreshedAt.clear());
+		onNativeSubscriptionChange(() => cache.lastRefreshedAt.clear());
+		subscribe((event) => {
+			if (event.type === "subscriptions-changed") cache.lastRefreshedAt.clear();
+		});
+		cache.subscribed = true;
+	}
+	return g[CATALOG_CACHE_KEY];
+}
+
+export async function refreshConnectionCatalog(
+	provider?: string,
+	options?: { force?: boolean; ttlMs?: number },
+): Promise<void> {
+	const cache = getCatalogRefreshCache();
+	const key = provider ?? "*";
+	const ttlMs = options?.ttlMs ?? DEFAULT_CATALOG_TTL_MS;
+	const force = options?.force === true;
+	const needsInitialChatGPT = (!provider || provider === "chatgpt") && chatGPTConnected() && chatGPTModels().length === 0;
+
+	if (!force && !needsInitialChatGPT) {
+		const last = cache.lastRefreshedAt.get(key);
+		if (last !== undefined && Date.now() - last < ttlMs) {
+			return;
+		}
+		const pending = cache.inflight.get(key);
+		if (pending) return pending;
+	}
+
+	const run = Promise.all([
+		!provider || provider === "chatgpt"
+			? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses"))
+			: Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
-	]);
+	]).then(() => {
+		cache.lastRefreshedAt.set(key, Date.now());
+	}).finally(() => {
+		if (cache.inflight.get(key) === run) {
+			cache.inflight.delete(key);
+		}
+	});
+
+	cache.inflight.set(key, run);
+	return run;
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
@@ -225,12 +283,14 @@ export function modelCatalog(): ModelCatalogResponse {
 		.map(toModelDto)
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
 		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
+	const cgError = chatGPTCatalogError();
 	return {
 		models,
 		defaults: catalogDefaults(),
 		rolePins: catalogRolePins(),
 		slots: catalogSlots(),
 		providers: catalogProviders(),
+		...(cgError ? { catalogErrors: { chatgpt: cgError } } : {}),
 	};
 }
 

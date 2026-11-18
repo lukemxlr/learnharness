@@ -14,9 +14,17 @@ export interface ChatGPTStatus {
 	error: string | null;
 	catalogError?: string | null;
 }
+export interface HeadlessAuthStart {
+	authorizeUrl: string;
+	redirectUri: string;
+	status: ChatGPTStatus;
+}
+
 export interface ChatGPTControlBridge {
 	status(): Promise<ChatGPTStatus>;
 	login(id?: string): Promise<ChatGPTStatus>;
+	startHeadless?(id?: string): Promise<HeadlessAuthStart>;
+	completeHeadless?(callbackUrlOrCode: string): Promise<ChatGPTStatus>;
 	cancel(): Promise<ChatGPTStatus>;
 	select(id: string): Promise<ChatGPTStatus>;
 	/** Explicitly forget every local registration/credential for this verified identity. */

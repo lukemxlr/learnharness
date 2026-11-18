@@ -1,5 +1,6 @@
 import { isPluginHostError } from "./plugin-host.ts";
 import { apiRequestRefusal } from "./desktop-access.ts";
+import { userAuthRefusal } from "./user-auth.ts";
 import type { PluginFrontendContext, PluginInfo } from "../core/plugins.ts";
 
 /** Thin HTTP adapter, separately injectable so its tests never boot plugins. */
@@ -65,7 +66,10 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 export function createPluginDocumentRoute(transport: Pick<ReturnType<typeof createPluginTransport>, "convertDocument">) {
 	const refusal = (request: Request) => {
 		const error = apiRequestRefusal(request);
-		return error ? json({ error }, 403) : undefined;
+		if (error) return json({ error }, 403);
+		const authError = userAuthRefusal(request);
+		if (authError) return json({ error: authError.error }, authError.status);
+		return undefined;
 	};
 	const unsupported = (request: Request) => refusal(request) ?? new Response(null, { status: 405 });
 	return {

@@ -62,6 +62,8 @@ export interface ModelCatalogResponse {
 	 * providers where exposed by the host. This is not a guarantee that each
 	 * provider has currently selectable models; inspect models and keyPresent. */
 	providers: CatalogProvider[];
+	/** Non-fatal catalog fetch error messages keyed by provider ID (last-known-good models retained). */
+	catalogErrors?: Record<string, string>;
 }
 
 /** One row of the providers surface. */

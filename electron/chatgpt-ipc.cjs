@@ -32,12 +32,15 @@ async function chatGPTControl(command, connection) {
 	try {
 		if (command?.op === "status") return await connection.status();
 		if (command?.op === "login" && (command.id === undefined || typeof command.id === "string")) return await connection.login(command.id);
+		if (command?.op === "start-headless" && (command.id === undefined || typeof command.id === "string")) return await connection.startHeadlessAuth(command.id);
+		if (command?.op === "complete-headless" && typeof command.callbackUrlOrCode === "string") return await connection.completeHeadlessAuth(command.callbackUrlOrCode);
+		if (command?.op === "reload") return await connection.reload();
 		if (command?.op === "cancel") return connection.cancelLogin();
 		if (command?.op === "select" && typeof command.id === "string") return await connection.select(command.id);
 		if (command?.op === "disconnect" && typeof command.id === "string") return await connection.disconnect(command.id);
 		if (command?.op === "logout" && typeof command.id === "string") return await connection.logout(command.id);
 		if (command?.op === "consent" && typeof command.enabled === "boolean") return await connection.consent(command.enabled);
 		return { error: "Unsupported ChatGPT control." };
-	} catch (err) { return { error: publicError(err) }; }
+	} catch (err) { return { error: err instanceof Error && err.message && !err.code ? err.message : publicError(err) }; }
 }
 module.exports = { attachChatGPTChild, trustedSender, chatGPTControl };

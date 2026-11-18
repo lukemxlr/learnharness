@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
 import { slotsConfigured } from "@/src/core";
 import { compactionInFlight, getChat, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
+import { requirePageAuth } from "../../_lib/auth.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export default async function ChatPage({
 	searchParams: Promise<{ prompt?: string }>;
 }) {
 	const [{ id }, { prompt }] = await Promise.all([params, searchParams]);
+	await requirePageAuth(`/chat/${encodeURIComponent(id)}`);
 	const chat = getChat(id);
 	if (!chat) notFound();
 	// The persistent setup CTA's seed (BYOK, owner 2026-09-22): slotsConfigured
@@ -26,9 +28,9 @@ export default async function ChatPage({
 			title={chat.title}
 			kind={chat.kind ?? "teach"}
 			// Wave D: the record IS native agent history — the client view is
-				// derived app-side (core/view.ts projectView; GET serves the same
-				// native messages).
-				initialMessages={chat.messages}
+			// derived app-side (core/view.ts projectView; GET serves the same
+			// native messages).
+			initialMessages={chat.messages}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}

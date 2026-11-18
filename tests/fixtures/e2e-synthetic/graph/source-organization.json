@@ -1,0 +1,20 @@
+{
+	"version": 1,
+	"folders": [
+		{
+			"id": "folder_synth_physics",
+			"name": "Synthetic Physics & Algorithms",
+			"parentId": null,
+			"createdAt": "2026-11-10T09:00:00.000Z"
+		}
+	],
+	"placements": {
+		"chat_synth_teach_01": {
+			"folderId": "folder_synth_physics"
+		},
+		"src_synth_01": {
+			"folderId": "folder_synth_physics",
+			"name": "kinematics.md"
+		}
+	}
+}

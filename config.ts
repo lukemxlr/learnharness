@@ -157,3 +157,5 @@ export const THEMES_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "them
 export const AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(/* turbopackIgnore: true */ process.env.LH_AUTH_FILE)
 	: path.join(/* turbopackIgnore: true */ ROOT, "auth.json");
+
+export const USER_AUTH_FILE = path.join(/* turbopackIgnore: true */ path.dirname(AUTH_FILE), "user-auth.json");

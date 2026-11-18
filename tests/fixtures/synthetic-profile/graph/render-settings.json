@@ -1,0 +1,22 @@
+{
+	"sizeUnits": "world",
+	"nodeSize": 8,
+	"edgeWidth": 1,
+	"arrowLength": 5,
+	"labelZoom": 0.4,
+	"labelSize": 10,
+	"clusterLabels": true,
+	"clusterLabelSize": 14,
+	"regions": {
+		"dilation": 24,
+		"opacity": 0.14
+	},
+	"physics": {
+		"charge": -180,
+		"linkDistance": 70,
+		"gravity": 0.08,
+		"clusterPull": 0.3,
+		"depthAnchor": "off",
+		"depthStrength": 0
+	}
+}

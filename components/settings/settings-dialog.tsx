@@ -45,7 +45,9 @@ import {
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
+import { SettingsRow, SettingsSection } from "./controls.tsx";
+import { Button } from "@/components/ui/button";
+import type { SessionStatusResponse } from "@/src/core";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -454,6 +456,7 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+									<AccountSessionRow />
 								</SettingsSection>
 							)}
 							{active === "keys" && (
@@ -526,4 +529,45 @@ export function SettingsDialogBody({
 		</div>
 	);
 	return renderFrame ? renderFrame(frame) : frame;
+}
+
+function AccountSessionRow() {
+	const [session, setSession] = useState<SessionStatusResponse | null>(null);
+	const [signingOut, setSigningOut] = useState(false);
+
+	useEffect(() => {
+		let active = true;
+		fetch("/api/auth/session")
+			.then((r) => (r.ok ? (r.json() as Promise<SessionStatusResponse>) : null))
+			.then((data) => {
+				if (active && data) setSession(data);
+			})
+			.catch(() => {});
+		return () => { active = false; };
+	}, []);
+
+	if (!session?.authRequired || !session.authenticated) return null;
+
+	return (
+		<SettingsRow
+			label="Server account"
+			hint={session.username ? `Signed in as ${session.username}` : "Signed in"}
+			testid="row-server-account"
+		>
+			<Button
+				type="button"
+				size="xs"
+				variant="outline"
+				disabled={signingOut}
+				data-testid="settings-sign-out"
+				onClick={async () => {
+					setSigningOut(true);
+					await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+					window.location.assign("/login");
+				}}
+			>
+				{signingOut ? "Signing out…" : "Sign out"}
+			</Button>
+		</SettingsRow>
+	);
 }

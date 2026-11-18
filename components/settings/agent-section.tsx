@@ -368,8 +368,9 @@ export function AgentSection({
 	/** Writes the whole compaction section (replace-PUT discipline). */
 	onCompactionChange: (next: CompactionSettings) => boolean | Promise<boolean>;
 }) {
-	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
+	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog, forceRefresh: forceRefreshCatalog } = useModelCatalog();
 	const catalog = body?.models;
+	const catalogErrors = body?.catalogErrors;
 	const slots = body?.slots;
 	/** The live search state (/api/search) — the row's reason line. */
 	const [folderInput, setFolderInput] = useState("");
@@ -662,6 +663,11 @@ export function AgentSection({
 					className="mb-1 self-start text-xs text-muted-foreground hover:text-foreground"
 				>{advancedModels ? "Hide advanced settings" : "Show advanced settings"}</button>
 				{catalogFailed && <p role="alert" className="text-xs text-error">Model catalog could not be loaded. Check the connection and retry. <button type="button" className="underline" onClick={refreshCatalog}>Retry</button></p>}
+				{catalogErrors && Object.entries(catalogErrors).map(([providerId, msg]) => (
+					<p key={providerId} role="alert" data-testid={`catalog-error-${providerId}`} className="text-xs text-error">
+						{msg} (showing last known models) <button type="button" className="underline" onClick={() => void forceRefreshCatalog(providerId)}>Refresh models</button>
+					</p>
+				))}
 				{MODEL_SLOTS.map((slot) => {
 					const override = models?.[slot];
 					const modelId = override?.model?.id ?? "";

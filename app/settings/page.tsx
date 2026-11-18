@@ -1,4 +1,7 @@
 import { redirect } from "next/navigation";
+import { requirePageAuth } from "../_lib/auth.ts";
+
+export const dynamic = "force-dynamic";
 
 /**
  * The settings surface graduated into a centered dialog over the app
@@ -6,6 +9,7 @@ import { redirect } from "next/navigation";
  * The URL stays routed but redirects: nothing should land on a dead
  * page; the dialog opens via the sidebar row or mod+,.
  */
-export default function SettingsPage() {
+export default async function SettingsPage() {
+	await requirePageAuth("/settings");
 	redirect("/chat/new");
 }

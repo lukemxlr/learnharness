@@ -1,0 +1,28 @@
+[Unit]
+Description=LearnHarness Learning Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=learnharness
+Group=learnharness
+WorkingDirectory=/opt/learnharness/standalone
+EnvironmentFile=/etc/learnharness/learnharness.env
+ExecStart=/usr/bin/node /opt/learnharness/standalone/server.js
+Restart=on-failure
+RestartSec=3
+
+# Persistent state & credential directories under /var/lib/learnharness
+StateDirectory=learnharness
+StateDirectoryMode=0700
+
+# LXC-compatible systemd hardening (omit MemoryDenyWriteExecute for V8 JIT/WASM and PrivateUsers for unprivileged LXC)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/learnharness
+
+[Install]
+WantedBy=multi-user.target

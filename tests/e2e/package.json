@@ -1,0 +1,15 @@
+{
+  "name": "learnharness-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:list": "playwright test --list",
+    "test:selfcheck": "playwright test specs/harness-selfcheck.spec.mjs",
+    "test:tier1": "playwright test specs/tier1-*.spec.mjs"
+  },
+  "dependencies": {
+    "@playwright/test": "1.46.1"
+  }
+}

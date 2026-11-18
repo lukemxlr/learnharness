@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
-import { useServerEvent, useServerResync } from "@/components/server-events";
+import { useNotifyHub, useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -104,13 +104,22 @@ export function useSidebar() {
 }
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
+	const hub = useNotifyHub();
 	useEffect(() => {
 		const bridge = window.lh?.chatgpt;
-		if (!bridge) return;
-		const off = bridge.onChange(() => notifySettingsSaved("keys"));
-		notifySettingsSaved("keys"); // cover changes missed before this root-lifetime subscription
-		return off;
-	}, []);
+		if (bridge) {
+			const off = bridge.onChange(() => notifySettingsSaved("keys"));
+			notifySettingsSaved("keys"); // cover changes missed before this root-lifetime subscription
+			return off;
+		}
+		if (!hub) return;
+		const offEvent = hub.subscribe("subscriptions-changed", () => notifySettingsSaved("keys"));
+		const offResync = hub.onResync(() => notifySettingsSaved("keys"));
+		return () => {
+			offEvent();
+			offResync();
+		};
+	}, [hub]);
 	// Start closed so server and client first-render agree (no hydration
 	// mismatch); the stored value is applied after mount.
 	const [open, setOpen] = useState(false);

@@ -1,0 +1,2 @@
+{"id":"arg_synth0000001","premises":["n_synth0000001","n_synth0000004"],"conclusion":"n_synth0000002","createdAt":"2026-11-10T09:15:00.000Z","provenance":[{"chatId":"chat_synth_teach_01","messageId":"msg_synth_t01_06"}]}
+{"id":"arg_synth0000002","premises":["n_synth0000001"],"conclusion":"n_synth0000004","createdAt":"2026-11-10T09:15:30.000Z","provenance":[{"chatId":"src_synth_01","messageId":""}]}

@@ -1,0 +1,70 @@
+{
+	"id": "chat_synth_prac_01",
+	"title": "Graph BFS/DFS Traversal Practice",
+	"kind": "practice",
+	"createdAt": "2026-11-11T10:00:00.000Z",
+	"updatedAt": "2026-11-11T10:12:00.000Z",
+	"version": 2,
+	"settings": {
+		"model": {
+			"provider": "custom",
+			"id": "gpt-test-1"
+		},
+		"thinkingLevel": "low"
+	},
+	"messages": [
+		{
+			"id": "msg_synth_p01_01",
+			"role": "custom",
+			"customType": "graph-context",
+			"content": "[Session context] — picked from the learner's synthetic knowledge map:\n- [n_synth0000003] BFS Queue Invariant: Breadth-first search visits vertices in non-decreasing order of edge distance from the source using a FIFO queue.",
+			"display": true,
+			"details": {
+				"propositions": [
+					{
+						"id": "n_synth0000003",
+						"name": "BFS Queue Invariant",
+						"statement": "Breadth-first search visits vertices in non-decreasing order of edge distance from the source using a FIFO queue."
+					}
+				]
+			},
+			"timestamp": 1794391200000
+		},
+		{
+			"id": "msg_synth_p01_02",
+			"role": "assistant",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "call_synth_prob_01",
+					"name": "problem",
+					"arguments": {
+						"statement": "Explain why replacing a FIFO queue with a LIFO stack in graph traversal changes shortest-path guarantees on unweighted graphs.",
+						"target": ["n_synth0000003"],
+						"modelSolution": "A FIFO queue processes all vertices at distance d before any at distance d+1, whereas a LIFO stack explores deep paths first and may discover a target along a longer path before shorter ones."
+					}
+				}
+			],
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "gpt-test-1",
+			"usage": {
+				"input": 95,
+				"output": 60,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 155,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "toolUse",
+			"timestamp": 1794391210000
+		}
+	]
+}

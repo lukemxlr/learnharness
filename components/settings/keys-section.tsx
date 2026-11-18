@@ -41,6 +41,7 @@ import { ProviderMenuList } from "./model-menu.tsx";
 import { useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { MenuShell } from "@/components/menu-shell";
+import { forceRefreshCatalog } from "@/components/model-catalog";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
 
@@ -386,6 +387,8 @@ export function KeysSection({
 	const [custom, setCustom] = useState<CustomStatus | null>(null);
 	const [addingCustom, setAddingCustom] = useState(false);
 	const [customEditorMounted, setCustomEditorMounted] = useState(false);
+	const [refreshingModels, setRefreshingModels] = useState(false);
+	const [refreshMessage, setRefreshMessage] = useState<{ error?: string; ok?: boolean } | null>(null);
 	const editorScopeRef = useRef<HTMLDivElement>(null);
 	useInteractionLayer({
 		kind: "view", rootRef: editorScopeRef,
@@ -574,6 +577,37 @@ export function KeysSection({
 
 			<SettingsGroup label="Subscriptions" testid="group-subscriptions">
 				<SubscriptionConnections />
+				<div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+					<button
+						type="button"
+						data-testid="refresh-models-btn"
+						disabled={refreshingModels}
+						onClick={async () => {
+							setRefreshingModels(true);
+							setRefreshMessage(null);
+							const ok = await forceRefreshCatalog();
+							setRefreshingModels(false);
+							if (ok) {
+								setRefreshMessage({ ok: true });
+							} else {
+								setRefreshMessage({ error: "Could not refresh models. Keeping last known model catalog." });
+							}
+						}}
+						className="cursor-pointer text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+					>
+						{refreshingModels ? "Refreshing models…" : "Refresh models"}
+					</button>
+					{refreshMessage?.error && (
+						<span role="alert" data-testid="refresh-models-error" className="text-xs text-error">
+							{refreshMessage.error}
+						</span>
+					)}
+					{refreshMessage?.ok && (
+						<span role="status" data-testid="refresh-models-ok" className="text-xs text-muted-foreground">
+							Models refreshed
+						</span>
+					)}
+				</div>
 			</SettingsGroup>
 
 			<SettingsGroup label="External CLI" testid="group-external-cli">

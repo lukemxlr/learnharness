@@ -39,7 +39,10 @@ it("Proxy retains API roots, siblings, endpoint lookalikes and all other API rou
 		"/api/plugins/document-one/other/documents/markdown", "/api/plugins/documents/markdown",
 		"/api/graph/import", "/api/events", "/api/chat", "/api/settings/models", "/api/chats/scratch/markdown",
 	]) assert.equal(proxyMatches(path), true, path);
-	for (const path of ["/", "/chat/new", "/apix", "/api-other/plugins/document-one/documents/markdown"]) {
+	for (const path of ["/", "/login", "/chat/new", "/settings", "/plugins/demo/main"]) {
+		assert.equal(proxyMatches(path), true, path);
+	}
+	for (const path of ["/apix", "/api-other/plugins/document-one/documents/markdown"]) {
 		assert.equal(proxyMatches(path), false, path);
 	}
 });

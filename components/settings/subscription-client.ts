@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { ChatGPTControlBridge, ChatGPTStatus, NativeSubscriptionControlBridge, NativeSubscriptionProviderId, NativeSubscriptionStatus } from "@/src/core";
+import type { ChatGPTControlBridge, ChatGPTStatus, HeadlessAuthStart, NativeSubscriptionControlBridge, NativeSubscriptionProviderId, NativeSubscriptionStatus } from "@/src/core";
 import { useNotifyHub, type createNotifyHub } from "@/components/server-events";
 
 type Hub = ReturnType<typeof createNotifyHub> | null;
@@ -48,6 +48,8 @@ export function createWebChatGPTBridge(hub: Hub): ChatGPTControlBridge {
 	return {
 		status: async () => (await status()).chatgpt,
 		login: (id) => withBrowser(() => control<ChatGPTStatus>("chatgpt", "login", { id })),
+		startHeadless: async (id) => (await control<HeadlessAuthStart>("chatgpt", "start-headless", { id })).value,
+		completeHeadless: (callbackUrlOrCode) => call("complete-headless", { callbackUrlOrCode }),
 		cancel: () => call("cancel"), select: (id) => call("select", { id }),
 		disconnect: (id) => call("disconnect", { id }), logout: (id) => call("logout", { id }),
 		consent: (enabled) => call("consent", { enabled }),

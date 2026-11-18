@@ -77,10 +77,31 @@ export function buildCorePlugins(root, { run = runNpm } = {}) {
 		validateCorePackages(root, staged);
 		publicCodePermissions(staged);
 		const hadPrevious = exists(out);
-		if (hadPrevious) fs.renameSync(out, previous);
-		try { fs.renameSync(staged, out); }
-		catch (error) { if (hadPrevious) fs.renameSync(previous, out); throw error; }
-		if (hadPrevious) fs.rmSync(previous, { recursive: true });
+		let renamed = false;
+		if (hadPrevious) {
+			try {
+				fs.renameSync(out, previous);
+				renamed = true;
+			} catch (error) {
+				if (error?.code !== "EBUSY") throw error;
+			}
+		}
+		if (!hadPrevious || renamed) {
+			try { fs.renameSync(staged, out); }
+			catch (error) { if (renamed) fs.renameSync(previous, out); throw error; }
+			if (renamed) fs.rmSync(previous, { recursive: true });
+		} else {
+			// When `out` is a Docker volume mount point, replace its contents in place
+			// only after `staged` has passed full validation above.
+			for (const entry of fs.readdirSync(out)) {
+				fs.rmSync(path.join(out, entry), { recursive: true, force: true });
+			}
+			for (const id of ids) {
+				fs.cpSync(path.join(staged, id), path.join(out, id), { recursive: true });
+			}
+			publicCodePermissions(out);
+			validateCorePackages(root, out);
+		}
 		console.log(`[core-plugins] built ${ids.join(", ")} into ${out}`);
 	} finally { if (exists(staged)) fs.rmSync(staged, { recursive: true, force: true }); }
 }

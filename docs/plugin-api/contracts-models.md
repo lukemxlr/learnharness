@@ -251,6 +251,7 @@ export interface ModelCatalogResponse {
     rolePins: RolePins;
     slots: SlotPins;
     providers: CatalogProvider[];
+    catalogErrors?: Record<string, string>;
 }
 ```
 
@@ -263,6 +264,7 @@ export interface ModelCatalogResponse {
 - [rolePins](#modelcatalogresponse-rolepins)
 - [slots](#modelcatalogresponse-slots)
 - [providers](#modelcatalogresponse-providers)
+- [catalogErrors](#modelcatalogresponse-catalogerrors)
 
 ### ModelCatalogResponse models
 
@@ -305,6 +307,14 @@ provider has currently selectable models; inspect models and keyPresent.
 
 ```ts
 providers: CatalogProvider[];
+```
+
+### ModelCatalogResponse catalogErrors
+
+Non-fatal catalog fetch error messages keyed by provider ID (last-known-good models retained).
+
+```ts
+catalogErrors?: Record<string, string>;
 ```
 
 ## RolePins

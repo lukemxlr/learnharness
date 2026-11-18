@@ -31,7 +31,49 @@ function fetchCatalog(revalidate = false): void {
 		.finally(() => { if (generation === catalogGeneration) catalogInflight = undefined; });
 }
 
-export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; failed: boolean; refresh: () => void } {
+export function forceRefreshCatalog(provider?: string): Promise<boolean> {
+	const generation = ++catalogGeneration;
+	catalogInflight = undefined;
+	catalogError = false;
+	publishCatalog();
+	const run = fetch("/api/models/refresh", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(provider ? { provider } : {}),
+	})
+		.then((r) => {
+			if (!r.ok) throw new Error(`catalog refresh failed: ${r.status}`);
+			return r.json() as Promise<ModelCatalogResponse>;
+		})
+		.then((c) => {
+			if (generation === catalogGeneration) {
+				catalogCache = c;
+				catalogError = false;
+				publishCatalog();
+			}
+			return true;
+		})
+		.catch(() => {
+			// Retain last-known-good catalogCache on error.
+			if (generation === catalogGeneration) {
+				catalogError = true;
+				publishCatalog();
+			}
+			return false;
+		})
+		.finally(() => {
+			if (generation === catalogGeneration) catalogInflight = undefined;
+		});
+	catalogInflight = run.then(() => undefined);
+	return run;
+}
+
+export function useModelCatalog(): {
+	catalog: ModelCatalogResponse | undefined;
+	failed: boolean;
+	refresh: () => void;
+	forceRefresh: (provider?: string) => Promise<boolean>;
+} {
 	const [snapshot, setSnapshot] = useState(() => ({ catalog: catalogCache, failed: catalogError }));
 	useEffect(() => {
 		const first = catalogReaders.size === 0;
@@ -50,5 +92,6 @@ export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; 
 		return () => { catalogReaders.delete(read); if (!catalogReaders.size) { stopCatalogSignals?.(); stopCatalogSignals = undefined; } };
 	}, []);
 	const refresh = useCallback(() => fetchCatalog(true), []);
-	return { ...snapshot, refresh };
+	const forceRefresh = useCallback((provider?: string) => forceRefreshCatalog(provider), []);
+	return { ...snapshot, refresh, forceRefresh };
 }

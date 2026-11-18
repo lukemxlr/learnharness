@@ -7,6 +7,58 @@ export function browserOnlyMode(env: Record<string, string | undefined> = proces
 	return env.LH_DESKTOP_SERVER !== "1" && !env.LH_DESKTOP_API_SECRET;
 }
 
+/** Whether reverse-proxy X-Forwarded-Proto / X-Forwarded-Host headers are trusted. */
+export function trustProxy(env: Record<string, string | undefined> = process.env): boolean {
+	return env.LH_TRUST_PROXY === "1";
+}
+
+function firstHeaderToken(value: string | null): string | undefined {
+	if (!value) return undefined;
+	const token = value.split(",")[0]?.trim();
+	return token || undefined;
+}
+
+export function effectiveRequestProto(
+	request: Request,
+	env: Record<string, string | undefined> = process.env,
+): "http:" | "https:" | undefined {
+	if (trustProxy(env) && request.headers.has("x-forwarded-proto")) {
+		const token = firstHeaderToken(request.headers.get("x-forwarded-proto"))?.toLowerCase();
+		if (token === "https") return "https:";
+		if (token === "http") return "http:";
+		return undefined;
+	}
+	try {
+		const protocol = new URL(request.url).protocol;
+		return protocol === "http:" || protocol === "https:" ? protocol : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function effectiveRequestHost(
+	request: Request,
+	env: Record<string, string | undefined> = process.env,
+): string | undefined {
+	if (trustProxy(env) && request.headers.has("x-forwarded-host")) {
+		return firstHeaderToken(request.headers.get("x-forwarded-host"));
+	}
+	const host = request.headers.get("host");
+	if (host !== null) return host.trim() || undefined;
+	try {
+		return new URL(request.url).host || undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+export function isHttpsRequest(
+	request: Request,
+	env: Record<string, string | undefined> = process.env,
+): boolean {
+	return effectiveRequestProto(request, env) === "https:";
+}
+
 /** Per-launch desktop HTTP capability. This is not an OS-user malware
  * boundary and is not an OAuth credential. Browser-only mode is checked by
  * browserAPIRefusal instead. */
@@ -24,27 +76,45 @@ export function desktopAPIAuthorized(
 	return actual.length === wanted.length && timingSafeEqual(actual, wanted);
 }
 
-/** Same-origin browser controls, not user authentication. Web/dev deliberately
- * retains the existing shared-server/API-key trust model. Never trust forwarded
- * origins or add CORS grants here. A public deployment needs its own access gate. */
-export function subscriptionRequestOrigin(request: Request): string | undefined {
+/** Same-origin browser controls, honoring X-Forwarded-Proto/Host only when
+ * LH_TRUST_PROXY=1 is explicitly enabled behind a trusted reverse proxy. */
+export function subscriptionRequestOrigin(
+	request: Request,
+	env: Record<string, string | undefined> = process.env,
+): string | undefined {
 	try {
-		const url = new URL(request.url);
-		const host = request.headers.get("host") ?? url.host;
-		const addressed = new URL(`${url.protocol}//${host}`);
-		if (!["http:", "https:"].includes(addressed.protocol) || addressed.username || addressed.password || addressed.pathname !== "/" || addressed.search || addressed.hash) return;
+		const proto = effectiveRequestProto(request, env);
+		const host = effectiveRequestHost(request, env);
+		if (!proto || !host || /\s/.test(host)) return;
+		const addressed = new URL(`${proto}//${host}`);
+		if (
+			!["http:", "https:"].includes(addressed.protocol) ||
+			addressed.username ||
+			addressed.password ||
+			addressed.pathname !== "/" ||
+			addressed.search ||
+			addressed.hash
+		) {
+			return;
+		}
 		return addressed.origin;
-	} catch { return; }
+	} catch {
+		return;
+	}
 }
 
 /** DNS rebinding needs an attacker-owned DNS name, so localhost names and IP
  * literals are always safe. Any other name must be listed in LH_ALLOWED_HOSTS
  * (comma-separated, case-insensitive, port ignored). */
-export function browserHostAllowed(host: string | null, env: Record<string, string | undefined> = process.env): boolean {
-	if (!host) return false;
+export function browserHostAllowed(host: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
+	if (!host || /\s/.test(host)) return false;
 	let hostname: string;
 	try {
-		hostname = new URL(`http://${host}`).hostname.toLowerCase();
+		const parsed = new URL(`http://${host}`);
+		if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+			return false;
+		}
+		hostname = parsed.hostname.toLowerCase();
 	} catch {
 		return false;
 	}
@@ -67,13 +137,13 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * cross-site check on writes. Writes without Origin or Sec-Fetch-Site come
  * from non-browser clients and are allowed. Returns the refusal, if any. */
 export function browserAPIRefusal(request: Request, env: Record<string, string | undefined> = process.env): string | undefined {
-	if (!browserHostAllowed(request.headers.get("host") ?? new URL(request.url).host, env)) {
+	if (!browserHostAllowed(effectiveRequestHost(request, env) ?? null, env)) {
 		return "This host name is not allowed. Use localhost or an IP address, or add the name to LH_ALLOWED_HOSTS.";
 	}
 	if (READ_METHODS.has(request.method.toUpperCase())) return;
 	const site = request.headers.get("sec-fetch-site");
 	const origin = request.headers.get("origin");
-	if ((site !== null && site !== "same-origin") || (origin !== null && origin !== subscriptionRequestOrigin(request))) {
+	if ((site !== null && site !== "same-origin") || (origin !== null && origin !== subscriptionRequestOrigin(request, env))) {
 		return "Cross-site requests to the LearnHarness API are not allowed.";
 	}
 }

@@ -1,0 +1,51 @@
+{
+	"id": "chat_synth_newer_01",
+	"title": "Newer Server Conflict Check Session",
+	"createdAt": "2026-11-12T08:00:00.000Z",
+	"updatedAt": "2026-11-18T12:00:00.000Z",
+	"version": 2,
+	"settings": {
+		"model": {
+			"provider": "custom",
+			"id": "gpt-test-1"
+		}
+	},
+	"messages": [
+		{
+			"id": "msg_synth_n01_01",
+			"role": "user",
+			"content": "Review conservation of linear momentum.",
+			"timestamp": 1794988800000
+		},
+		{
+			"id": "msg_synth_n01_02",
+			"role": "assistant",
+			"content": [
+				{
+					"type": "text",
+					"text": "In an isolated system with zero net external force, total linear momentum p = sum(m_i * v_i) remains constant."
+				}
+			],
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "gpt-test-1",
+			"usage": {
+				"input": 60,
+				"output": 30,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"reasoning": 0,
+				"totalTokens": 90,
+				"cost": {
+					"input": 0,
+					"output": 0,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"total": 0
+				}
+			},
+			"stopReason": "stop",
+			"timestamp": 1794988810000
+		}
+	]
+}

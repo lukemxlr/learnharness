@@ -1,0 +1,44 @@
+{
+	"src_synth_01": {
+		"id": "src_synth_01",
+		"filePath": "C:\\Users\\Synth\\Notes\\kinematics.md",
+		"importedAt": "2026-11-10T09:05:00.000Z",
+		"extractions": [
+			{
+				"startedAt": 1794301500000,
+				"at": "2026-11-10T09:05:30.000Z",
+				"durationMs": 30000,
+				"stats": {
+					"nodes": 2,
+					"chains": 1
+				},
+				"stages": {
+					"extractor": {
+						"model": "custom:gpt-test-1",
+						"steps": [
+							{
+								"inputTokens": 200,
+								"outputTokens": 100,
+								"cacheReadTokens": 0,
+								"cacheWriteTokens": 0,
+								"reasoningTokens": 0
+							}
+						]
+					},
+					"auditor": {
+						"model": "custom:gpt-test-1",
+						"steps": [
+							{
+								"inputTokens": 120,
+								"outputTokens": 40,
+								"cacheReadTokens": 0,
+								"cacheWriteTokens": 0,
+								"reasoningTokens": 0
+							}
+						]
+					}
+				}
+			}
+		]
+	}
+}

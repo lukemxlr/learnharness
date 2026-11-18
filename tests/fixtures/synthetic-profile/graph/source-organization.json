@@ -1,0 +1,16 @@
+{
+	"version": 1,
+	"folders": [
+		{
+			"id": "folder_synth_geom",
+			"name": "Geometry 101",
+			"parentId": null,
+			"createdAt": "2026-11-01T10:00:00.000Z"
+		}
+	],
+	"placements": {
+		"chat_synth_teach_01": {
+			"folderId": "folder_synth_geom"
+		}
+	}
+}

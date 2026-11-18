@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState } from "react";
-import type { ChatGPTStatus } from "@/src/core";
+import type { ChatGPTStatus, HeadlessAuthStart } from "@/src/core";
 import { ConnectionDialog, ConnectionFooter, ConnectionRow } from "./connection-controls";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "./controls";
@@ -54,6 +54,9 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 	const [background, setBackground] = useState(true);
 	const [backgroundDirty, setBackgroundDirty] = useState(false);
 	const [registration, setRegistration] = useState("");
+	const [headlessStart, setHeadlessStart] = useState<HeadlessAuthStart | null>(null);
+	const [headlessCallback, setHeadlessCallback] = useState("");
+	const [headlessCopied, setHeadlessCopied] = useState(false);
 	const operation = useRef<"login" | "cancel" | "change" | "disconnect" | null>(null);
 	const generation = useRef(0);
 	const statusSequence = useRef(0);
@@ -146,6 +149,9 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		setBackground(statusRef.current.allowBackgroundUse);
 		setBackgroundDirty(false);
 		setRegistration(accountId);
+		setHeadlessStart(null);
+		setHeadlessCallback("");
+		setHeadlessCopied(false);
 		setError(null);
 		setDismissedError(status.error);
 		showDialog({ kind: "connect" });
@@ -154,11 +160,11 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		if (operation.current === "disconnect" || operation.current === "change" || operation.current === "cancel") return "blocked";
 		const current = dialogRef.current;
 		if (current?.kind === "manage" && current.confirm) { showDialog({ ...current, confirm: false }); setError(null); return "handled-without-close"; }
-		const cancel = loginAttempt.current !== null || statusRef.current.pending;
+		const cancel = loginAttempt.current !== null || statusRef.current.pending || headlessStart !== null;
 		const intent = ++generation.current;
 		const owner = dialogRef.current;
 		loginAttempt.current = null;
-		if (!cancel) showDialog(null);
+		if (!cancel) { setHeadlessStart(null); setHeadlessCallback(""); setHeadlessCopied(false); showDialog(null); }
 		setError(null);
 		setDismissedError(status.error);
 		if (cancel) {
@@ -176,6 +182,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 					next = refresh === statusSequence.current ? publishStatus(current) : statusRef.current;
 				} else next = publishStatus(value);
 				if (next && !next.pending) {
+					setHeadlessStart(null); setHeadlessCallback(""); setHeadlessCopied(false);
 					setDismissedError(value.error); // Dismiss only this cancellation's error, not a newer failure.
 					if (dialogRef.current === owner) showDialog(null);
 				} else if (next) setError(CONTROL_ERROR);
@@ -246,6 +253,75 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		// No finally: pending OAuth outlives this IPC promise. Only its status
 		// completion, failure, or explicit cancellation releases the attempt.
 	}
+	async function startHeadless() {
+		const owner = dialogRef.current;
+		if (!bridge?.startHeadless || operation.current || !status.available || status.pending || owner?.kind !== "connect") return;
+		const attempt: LoginAttempt = { generation: ++generation.current, dialog: owner, registration, background, backgroundDirty, pending: true, phase: "pending" };
+		loginAttempt.current = attempt;
+		operation.current = "login";
+		setBusy(true); setError(null); setDismissedError(null);
+		try {
+			const started = await bridge.startHeadless(registration || undefined);
+			if (!owns(attempt)) return;
+			if (!started || typeof started !== "object" || typeof started.authorizeUrl !== "string") {
+				setError(replyError(started));
+				finish(attempt);
+				return;
+			}
+			setHeadlessStart(started);
+			setHeadlessCopied(false);
+			if (isStatus(started.status)) publishStatus(started.status);
+			operation.current = null;
+			setBusy(false);
+		} catch {
+			if (owns(attempt)) {
+				setError(CONTROL_ERROR);
+				finish(attempt);
+			}
+		}
+	}
+	async function completeHeadless() {
+		const attempt = loginAttempt.current;
+		const owner = dialogRef.current;
+		if (!bridge?.completeHeadless || !headlessStart || owner?.kind !== "connect") return;
+		const currentAttempt: LoginAttempt = attempt && owns(attempt)
+			? attempt
+			: { generation: ++generation.current, dialog: owner, registration, background, backgroundDirty, pending: true, phase: "pending" };
+		loginAttempt.current = currentAttempt;
+		operation.current = "login";
+		setBusy(true); setError(null);
+		try {
+			const result: unknown = await bridge.completeHeadless(headlessCallback);
+			if (!owns(currentAttempt)) return;
+			if (!isStatus(result)) {
+				setError(replyError(result));
+				operation.current = null;
+				setBusy(false);
+				return;
+			}
+			const next = publishStatus(result);
+			if (!next) {
+				operation.current = null;
+				setBusy(false);
+				return;
+			}
+			if (next.pending) {
+				setError(next.error || "Sign-in could not be completed yet. Check the pasted redirect URL.");
+				operation.current = null;
+				setBusy(false);
+				return;
+			}
+			setHeadlessStart(null);
+			setHeadlessCallback("");
+			await complete(currentAttempt, next);
+		} catch {
+			if (owns(currentAttempt)) {
+				setError(CONTROL_ERROR);
+				operation.current = null;
+				setBusy(false);
+			}
+		}
+	}
 	const context = {
 		status, busy, error: warning ? null : visibleError, inlineError: dialog || warning ? null : visibleError, warning: dialog?.kind === "warning" ? null : warning,
 		connect: openConnect,
@@ -295,7 +371,85 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 					<a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer" className="underline underline-offset-2">Manage usage</a>
 				</div>
 				{!status.available && <p className="mt-3 text-xs text-muted-foreground">ChatGPT sign-in is available only in the desktop app. API-key connections remain available here.</p>}
-				{status.pending && <p role="status" className="mt-3 text-xs text-muted-foreground">Waiting for browser sign-in…</p>}
+				{status.pending && !headlessStart && <p role="status" className="mt-3 text-xs text-muted-foreground">Waiting for browser sign-in…</p>}
+				{dialog.kind === "connect" && web && bridge?.startHeadless && bridge?.completeHeadless && (
+					<div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3 text-xs" data-testid="chatgpt-headless-section">
+						{!headlessStart ? (
+							<div className="flex flex-wrap items-center justify-between gap-2">
+								<span className="text-muted-foreground">Running on a headless/remote server?</span>
+								<Button type="button" variant="outline" size="xs" data-testid="chatgpt-headless-start" disabled={!status.available || busy || status.pending} onClick={() => void startHeadless()}>
+									Get sign-in link
+								</Button>
+							</div>
+						) : (
+							<div className="space-y-2.5">
+								<p className="font-medium text-foreground">Remote / headless sign-in</p>
+								<p className="leading-relaxed text-muted-foreground">
+									1. Open the sign-in link below in your browser. After signing in, your browser redirects to <code className="font-mono">127.0.0.1</code> — copy the full URL from the address bar and paste it in step 2{(() => {
+										try {
+											const port = new URL(headlessStart.redirectUri).port;
+											return port ? <> (or forward port <code className="font-mono">{port}</code> over SSH)</> : null;
+										} catch {
+											return null;
+										}
+									})()}.
+								</p>
+								<div className="flex items-center gap-2">
+									<input
+										type="text"
+										readOnly
+										value={headlessStart.authorizeUrl}
+										aria-label="ChatGPT authorization URL"
+										data-testid="chatgpt-headless-url"
+										onFocus={(e) => e.currentTarget.select()}
+										className="min-h-[36px] min-w-0 flex-1 rounded-sm border border-border bg-background px-2 font-mono text-[11px] text-foreground"
+									/>
+									<Button
+										type="button"
+										variant="outline"
+										size="xs"
+										data-testid="chatgpt-headless-copy"
+										onClick={() => {
+											void navigator.clipboard?.writeText(headlessStart.authorizeUrl).then(() => setHeadlessCopied(true)).catch(() => {});
+										}}
+									>
+										{headlessCopied ? "Copied" : "Copy link"}
+									</Button>
+									<a
+										href={headlessStart.authorizeUrl}
+										target="_blank"
+										rel="noreferrer"
+										className="shrink-0 text-foreground underline underline-offset-2"
+									>
+										Open
+									</a>
+								</div>
+								<div className="flex flex-col gap-1.5 sm:flex-row sm:items-center">
+									<input
+										type="text"
+										value={headlessCallback}
+										onChange={(e) => setHeadlessCallback(e.target.value)}
+										placeholder="Paste redirect URL (http://127.0.0.1:.../auth/callback?...)"
+										aria-label="Redirect callback URL or code"
+										data-testid="chatgpt-headless-callback"
+										disabled={busy}
+										className="min-h-[36px] min-w-0 flex-1 rounded-sm border border-border bg-background px-2 font-mono text-xs text-foreground"
+									/>
+									<Button
+										type="button"
+										variant="outline"
+										size="sm"
+										data-testid="chatgpt-headless-complete"
+										disabled={busy || !headlessCallback.trim()}
+										onClick={() => void completeHeadless()}
+									>
+										Complete sign-in
+									</Button>
+								</div>
+							</div>
+						)}
+					</div>
+				)}
 				{context.error && <p role="alert" className="mt-3 text-xs text-error">{context.error}</p>}
 				{dialog.kind === "manage" && managed && <div className="mt-4 flex flex-wrap items-center justify-between gap-3" data-testid="chatgpt-account-strip">
 					<div data-testid="chatgpt-managed-identity" className="flex min-w-0 items-center gap-2 text-xs text-foreground">

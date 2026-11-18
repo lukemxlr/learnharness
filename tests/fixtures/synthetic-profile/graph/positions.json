@@ -1,0 +1,8 @@
+{
+	"positions": {
+		"n_synth_parallel": { "x": -120, "y": 0 },
+		"n_synth_triangle_sum": { "x": 120, "y": 0 },
+		"n_synth_linear": { "x": 0, "y": 140 }
+	},
+	"updatedAt": "2026-11-02T10:04:00.000Z"
+}
