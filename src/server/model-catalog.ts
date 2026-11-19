@@ -69,9 +69,9 @@ export async function refreshConnectionCatalog(
 		if (last !== undefined && Date.now() - last < ttlMs) {
 			return;
 		}
-		const pending = cache.inflight.get(key);
-		if (pending) return pending;
 	}
+	const pending = cache.inflight.get(key);
+	if (pending) return pending;
 
 	const run = Promise.all([
 		!provider || provider === "chatgpt"

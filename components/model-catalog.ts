@@ -51,7 +51,9 @@ export function forceRefreshCatalog(provider?: string): Promise<boolean> {
 				catalogError = false;
 				publishCatalog();
 			}
-			return true;
+			const errors = c.catalogErrors;
+			if (!errors) return true;
+			return provider ? !errors[provider] : !Object.values(errors).some(Boolean);
 		})
 		.catch(() => {
 			// Retain last-known-good catalogCache on error.

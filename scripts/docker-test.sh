@@ -4,6 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 IMAGE_NAME="${LH_DOCKER_IMAGE:-learnharness-test:node26}"
+TEST_CONCURRENCY="${LH_TEST_CONCURRENCY:-4}"
+if ! [[ "${TEST_CONCURRENCY}" =~ ^[1-9][0-9]*$ ]]; then
+	echo "Invalid LH_TEST_CONCURRENCY '${TEST_CONCURRENCY}' (expected positive integer)." >&2
+	exit 2
+fi
 
 build_image() {
 	echo "[docker-test] Building image ${IMAGE_NAME} from docker/Dockerfile.test..."
@@ -56,7 +61,9 @@ case "${CMD}" in
 			for arg in "$@"; do
 				ARGS="${ARGS} $(printf '%q' "${arg}")"
 			done
-			run_in_container "NODE_ENV=test ./node_modules/.bin/tsx --test${ARGS}"
+			run_in_container "NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=${TEST_CONCURRENCY}${ARGS}"
+		elif [ -n "${LH_TEST_CONCURRENCY:-}" ]; then
+			run_in_container "NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=${TEST_CONCURRENCY} tests/*.test.ts tests/*.test.tsx"
 		else
 			run_in_container "npm test"
 		fi

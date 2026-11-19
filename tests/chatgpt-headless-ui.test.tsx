@@ -163,6 +163,9 @@ test("headless OAuth UI panel in web mode supports link generation, clipboard co
 	// Generate sign-in link
 	await click(byTest("chatgpt-headless-start"));
 	assert.equal(ops[0]?.op, "start-headless");
+	assert.match(byTest("chatgpt-headless-section").textContent ?? "", /forward port 1455 over SSH/);
+	const openLink = byTest("chatgpt-headless-section").querySelector<HTMLAnchorElement>('a[href^="https://"]');
+	assert.equal(openLink?.getAttribute("href"), authorizeUrl);
 	const urlInput = byTest<HTMLInputElement>("chatgpt-headless-url");
 	assert.equal(urlInput.value, authorizeUrl);
 	assert.equal(urlInput.hasAttribute("readonly"), true);
@@ -173,12 +176,13 @@ test("headless OAuth UI panel in web mode supports link generation, clipboard co
 	assert.deepEqual(copied, [authorizeUrl]);
 	assert.equal(byTest("chatgpt-headless-copy").textContent?.trim(), "Copied");
 
-	// Invalid callback keeps headless panel open and displays error
+	// Invalid callback keeps headless panel, pasted input, and authorize URL intact while displaying error
 	await setInputValue(byTest<HTMLInputElement>("chatgpt-headless-callback"), "bad-url");
 	assert.equal((byTest<HTMLButtonElement>("chatgpt-headless-complete")).disabled, false);
 	await click(byTest("chatgpt-headless-complete"));
 	assert.equal(document.querySelector('[role="alert"]')?.textContent, "Paste the full redirect URL from your browser.");
-	assert.ok(document.querySelector('[data-testid="chatgpt-headless-callback"]'));
+	assert.equal(byTest<HTMLInputElement>("chatgpt-headless-callback").value, "bad-url");
+	assert.equal(byTest<HTMLInputElement>("chatgpt-headless-url").value, authorizeUrl);
 
 	// Valid callback completes headless login, persists background consent draft, and closes dialog
 	await setInputValue(byTest<HTMLInputElement>("chatgpt-headless-callback"), `${redirectUri}?code=valid-code&state=s1`);
@@ -296,6 +300,33 @@ test("KeysSection manual Refresh models button handles transient failure non-des
 	assert.equal(refreshCalls, 2);
 	assert.equal(byTest("refresh-models-ok").textContent?.trim(), "Models refreshed");
 	assert.equal(document.querySelector('[data-testid="refresh-models-error"]'), null);
+});
+
+test("KeysSection surfaces error when POST /api/models/refresh returns HTTP 200 with catalogErrors", async () => {
+	globalThis.fetch = (async (input, init) => {
+		const url = String(input);
+		if (url === "/api/keys") return Response.json({ providers: [], keys: [] });
+		if (url === "/api/custom-provider") {
+			return Response.json({ baseUrl: "", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [], overrides: {}, manualModels: [] });
+		}
+		if (url === "/api/claude-code") return Response.json({ state: "not-found", version: null, minimumVersion: "2.1.259" });
+		if (url === "/api/subscriptions") return Response.json({ chatgpt: connected(), native: [] });
+		if (url === "/api/models/refresh" && init?.method === "POST") {
+			return Response.json({
+				models: [],
+				providers: [{ id: "chatgpt", envVar: "", keyPresent: true }],
+				slots: { strong: null, cheap: null, vision: null },
+				defaults: null,
+				catalogErrors: { chatgpt: "The ChatGPT account model catalog is unavailable." },
+			});
+		}
+		throw new Error(`Unexpected fetch: ${url}`);
+	}) as typeof fetch;
+
+	await mount(<KeysSection />);
+	await click(byTest<HTMLButtonElement>("refresh-models-btn"));
+	assert.equal(byTest("refresh-models-error").textContent?.trim(), "Could not refresh models. Keeping last known model catalog.");
+	assert.equal(document.querySelector('[data-testid="refresh-models-ok"]'), null);
 });
 
 test("AgentSection displays non-destructive catalog error banner, keeps last-known models selectable, and refreshes on click", async () => {

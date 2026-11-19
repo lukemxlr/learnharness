@@ -19,6 +19,9 @@ export function sanitizeNextPath(next: string | null | undefined): string {
 	try {
 		const parsed = new URL(trimmed, "http://localhost");
 		if (parsed.origin !== "http://localhost") return "/";
+		if (!parsed.pathname.startsWith("/") || parsed.pathname.startsWith("//") || parsed.pathname.startsWith("/\\")) {
+			return "/";
+		}
 		return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 	} catch {
 		return "/";

@@ -7,11 +7,30 @@ const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
-const ISSUER = "https://auth.openai.com";
-const RESOURCE = "https://api.openai.com/v1";
-const AUTHORIZE = `${ISSUER}/api/accounts/authorize`;
-const TOKEN = `${ISSUER}/api/accounts/oauth/token`;
-const JWKS = `${ISSUER}/.well-known/jwks.json`;
+const PROD_ISSUER = "https://auth.openai.com";
+const PROD_RESOURCE = "https://api.openai.com/v1";
+const LOOPBACK_TEST_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+function loopbackTestUrl(raw, { allowPath = false } = {}) {
+	if (process.env.NODE_ENV !== "test" && process.env.LH_IGNORE_ENV_KEYS !== "1") return null;
+	if (typeof raw !== "string") return null;
+	const trimmed = raw.trim();
+	if (!trimmed) return null;
+	try {
+		const parsed = new URL(trimmed);
+		if (parsed.protocol !== "http:") return null;
+		if (!LOOPBACK_TEST_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+		if (parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+		if (!allowPath && parsed.pathname !== "/") return null;
+		const cleanPath = parsed.pathname.replace(/\/+$/, "");
+		return allowPath ? `${parsed.origin}${cleanPath}` : parsed.origin;
+	} catch {
+		return null;
+	}
+}
+
+const currentIssuer = () => loopbackTestUrl(process.env.LH_CHATGPT_OAUTH_ISSUER) ?? PROD_ISSUER;
+const currentResource = () => loopbackTestUrl(process.env.LH_CHATGPT_API_BASE, { allowPath: true }) ?? PROD_RESOURCE;
 const SCOPES = ["openid", "profile", "email", "offline_access", "resource.invoke", "chatgpt.tokens.use.direct"];
 const REVOCATION_WARNING = "Account disconnected locally. Remote revocation could not be confirmed.";
 const random = () => crypto.randomBytes(32).toString("base64url");
@@ -38,8 +57,9 @@ function validateState(state) {
 	if (!state || state.version !== 1 || !nonempty(state.hostId) || !Array.isArray(state.registrations) || !(state.activeId === null || nonempty(state.activeId))) throw fail("storage");
 	if (Object.hasOwn(state, "allowBackgroundUse") && typeof state.allowBackgroundUse !== "boolean") throw fail("storage");
 	const ids = new Set(); const clients = new Set();
+	const expectedIssuer = currentIssuer();
 	for (const r of state.registrations) {
-		if (!r || !nonempty(r.id) || ids.has(r.id) || !nonempty(r.clientId) || r.clientId === "dynamic_agent_client" || clients.has(r.clientId) || r.issuer !== ISSUER || !nonempty(r.subject) || (Object.hasOwn(r, "background") && typeof r.background !== "boolean") || (r.email !== undefined && typeof r.email !== "string") || (Object.hasOwn(r, "reconnectRequired") && r.reconnectRequired !== true)) throw fail("storage");
+		if (!r || !nonempty(r.id) || ids.has(r.id) || !nonempty(r.clientId) || r.clientId === "dynamic_agent_client" || clients.has(r.clientId) || r.issuer !== expectedIssuer || !nonempty(r.subject) || (Object.hasOwn(r, "background") && typeof r.background !== "boolean") || (r.email !== undefined && typeof r.email !== "string") || (Object.hasOwn(r, "reconnectRequired") && r.reconnectRequired !== true)) throw fail("storage");
 		ids.add(r.id); clients.add(r.clientId);
 		if (r.tokens !== undefined) {
 			const t = r.tokens;
@@ -113,7 +133,7 @@ function fileStore(file) {
 function allowedAuthEndpoint(value) {
 	try {
 		const url = new URL(value);
-		return url.origin === ISSUER && !url.username && !url.password && !url.search && !url.hash;
+		return url.origin === currentIssuer() && !url.username && !url.password && !url.search && !url.hash;
 	} catch { return false; }
 }
 
@@ -243,10 +263,11 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 	async function identity(idToken, clientId, nonce, expectedSubject) {
 		try {
 			const { jwtVerify, createLocalJWKSet } = await import("jose");
+			const issuer = currentIssuer();
 			// Fixed, documented JWKS origin; never follow a discovery-supplied URL.
-			const keys = await json(JWKS);
+			const keys = await json(`${issuer}/.well-known/jwks.json`);
 			const { payload } = await jwtVerify(idToken, createLocalJWKSet(keys), {
-				issuer: ISSUER, audience: clientId, algorithms: ["RS256"],
+				issuer, audience: clientId, algorithms: ["RS256"],
 				requiredClaims: ["sub", "exp", "iat"], clockTolerance: 5,
 			});
 			if (typeof payload.sub !== "string" || !payload.sub || (nonce !== undefined && payload.nonce !== nonce) || (expectedSubject && payload.sub !== expectedSubject)) throw fail("identity");
@@ -267,7 +288,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 		return { accessToken: body.access_token, refreshToken, idToken: body.id_token ?? previous?.idToken, scopes, expiresAt: Date.now() + body.expires_in * 1000 };
 	}
 	async function grant(fields, signal) {
-		return json(TOKEN, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ ...fields, resource: RESOURCE }), signal });
+		return json(`${currentIssuer()}/api/accounts/oauth/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ ...fields, resource: currentResource() }), signal });
 	}
 
 	async function beginAuthAttempt(accountId, { headless = false } = {}) {
@@ -314,7 +335,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 					if (closed || abort.signal.aborted || epoch !== attemptEpoch) throw fail("cancelled");
 					const existing = state.registrations.find((r) => r.clientId === clientId);
 					if (existing && existing.subject !== verified.subject) throw fail("identity");
-					const record = { id: existing?.id ?? crypto.randomUUID(), clientId, issuer: ISSUER, ...verified, tokens };
+					const record = { id: existing?.id ?? crypto.randomUUID(), clientId, issuer: currentIssuer(), ...verified, tokens };
 					const next = structuredClone(state);
 					next.registrations = next.registrations.filter((r) => r.id !== record.id).concat(record);
 					next.activeId = record.id;
@@ -403,14 +424,14 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				await processParams(params, false);
 			});
 			timer = setTimeout(() => cancel("timeout"), timeoutMs);
-			const url = new URL(AUTHORIZE);
+			const url = new URL(`${currentIssuer()}/api/accounts/authorize`);
 			url.search = new URLSearchParams({
 				client_id: selected?.clientId ?? "dynamic_agent_client",
 				...(selected ? {} : { agent_name_hint: "LearnHarness" }),
 				ext_agent_host_id: state.hostId,
 				...(selected?.tokens?.idToken ? { id_token_hint: selected.tokens.idToken } : {}),
 				...(selected?.email ? { login_hint: selected.email } : {}),
-				response_type: "code", redirect_uri: redirectUri, scope: SCOPES.join(" "), resource: RESOURCE,
+				response_type: "code", redirect_uri: redirectUri, scope: SCOPES.join(" "), resource: currentResource(),
 				state: expectedState, nonce, code_challenge_method: "S256",
 				code_challenge: crypto.createHash("sha256").update(verifier).digest("base64url"),
 			}).toString();
@@ -558,7 +579,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			if (!active()) return modelValue();
 			// Discovery is identity/scope authorization, not an invented model lease.
 			const token = await credential(false);
-			const body = await json(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
+			const body = await json(`${currentResource()}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
 			authorized(false, undefined, token.epoch);
 			if (sequence !== catalogSequence || active()?.id !== token.accountId || !Array.isArray(body.models)) throw fail("catalog");
 			const visible = body.models
@@ -629,8 +650,9 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 		let revoked = false;
 		try {
 			if (account.tokens?.refreshToken) {
-				const config = await json(`${ISSUER}/.well-known/openid-configuration`);
-				if (config.issuer !== ISSUER || !allowedAuthEndpoint(config.revocation_endpoint)) throw fail("identity");
+				const issuer = currentIssuer();
+				const config = await json(`${issuer}/.well-known/openid-configuration`);
+				if (config.issuer !== issuer || !allowedAuthEndpoint(config.revocation_endpoint)) throw fail("identity");
 				for (let attempt = 0; attempt < 2; attempt++) {
 					if (attempt) await new Promise((resolve) => setTimeout(resolve, 200));
 					try {

@@ -328,4 +328,254 @@ describe("Headless ChatGPT OAuth, reload, and dynamic model catalog (F5)", () =>
 			if (prevSecret === undefined) delete process.env.LH_DESKTOP_API_SECRET; else process.env.LH_DESKTOP_API_SECRET = prevSecret;
 		}
 	});
+
+	it("coalesces concurrent initial-load and forced refreshConnectionCatalog calls to a single /v1/models fetch", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-coalesce-cg-"));
+		tempDirs.push(dir);
+		const authFile = path.join(dir, "auth.json");
+		const dataDir = path.join(dir, "data");
+		await fs.mkdir(dataDir, { recursive: true });
+		await fs.writeFile(authFile, "{}\n", { mode: 0o600 });
+		const credPath = path.join(dir, "chatgpt-credentials.json");
+		await fs.writeFile(
+			credPath,
+			JSON.stringify({
+				version: 1,
+				hostId: "urn:uuid:00000000-0000-4000-8000-000000000004",
+				activeId: "acc-coalesce",
+				registrations: [
+					{
+						id: "acc-coalesce",
+						clientId: "oaiapp_coalesce",
+						issuer: "https://auth.openai.com",
+						subject: "sub-coalesce",
+						email: "coalesce@example.invalid",
+						tokens: {
+							accessToken: "test-coalesce-access",
+							refreshToken: "test-coalesce-refresh",
+							idToken: "test-coalesce-id",
+							scopes: SCOPES,
+							expiresAt: Date.now() + 3600_000,
+						},
+					},
+				],
+			}),
+			{ mode: 0o600 },
+		);
+
+		const prevAuth = process.env.LH_AUTH_FILE;
+		const prevData = process.env.LH_DATA_DIR;
+		const prevDesktop = process.env.LH_DESKTOP_SERVER;
+		const prevSecret = process.env.LH_DESKTOP_API_SECRET;
+		const realFetch = globalThis.fetch;
+
+		process.env.LH_AUTH_FILE = authFile;
+		process.env.LH_DATA_DIR = dataDir;
+		delete process.env.LH_DESKTOP_SERVER;
+		delete process.env.LH_DESKTOP_API_SECRET;
+
+		const { AUTH_FILE } = await import("../config.ts");
+		const effectiveCredPath = path.join(path.dirname(AUTH_FILE), "chatgpt-credentials.json");
+		const prevCredBytes = await fs.readFile(effectiveCredPath).catch(() => null);
+		if (effectiveCredPath !== credPath) {
+			await fs.mkdir(path.dirname(effectiveCredPath), { recursive: true });
+			await fs.copyFile(credPath, effectiveCredPath);
+		}
+
+		let modelFetchCount = 0;
+		globalThis.fetch = (async (input: unknown) => {
+			if (String(input) === "https://api.openai.com/v1/models") {
+				modelFetchCount++;
+				await new Promise((r) => setTimeout(r, 25));
+				return Response.json({
+					models: [
+						{ slug: "gpt-5.4-coalesced", display_name: "GPT-5.4 Coalesced", visibility: "list" },
+					],
+				});
+			}
+			throw new Error(`Unexpected fetch: ${String(input)}`);
+		}) as typeof fetch;
+
+		try {
+			for (const sym of ["lh.webSubscriptions", "lh.chatgpt.bridge", "lh.modelCatalog.refreshCache", "lh.webSubscriptionRuntime"]) {
+				Reflect.deleteProperty(globalThis, Symbol.for(sym));
+			}
+			const suffix = `?coalesce=${Date.now()}`;
+			const { chatGPTConnected, chatGPTModels } = await import(`../src/agent/chatgpt-bridge.ts${suffix}`);
+			const { refreshConnectionCatalog } = await import(`../src/server/model-catalog.ts${suffix}`);
+			const { webSubscriptionOwner } = await import(`../src/server/web-subscriptions.ts${suffix}`);
+
+			// Initialize bridge listener before consent() emits state packet, so
+			// chatGPTConnected() === true and chatGPTModels().length === 0 (needsInitialChatGPT === true)
+			// with 0 /v1/models fetches so far.
+			assert.equal(chatGPTConnected(), false);
+			const owner = webSubscriptionOwner();
+			await owner.control("chatgpt", { op: "consent", enabled: true }, "http://localhost:3000");
+			assert.equal(chatGPTConnected(), true);
+			assert.equal(chatGPTModels().length, 0);
+			assert.equal(modelFetchCount, 0);
+
+			// 3 concurrent initial-load calls with needsInitialChatGPT=true must coalesce to 1 fetch
+			await Promise.all([
+				refreshConnectionCatalog("chatgpt"),
+				refreshConnectionCatalog("chatgpt"),
+				refreshConnectionCatalog("chatgpt"),
+			]);
+			assert.equal(modelFetchCount, 1, "3 concurrent initial-load calls with needsInitialChatGPT=true must coalesce to 1 fetch");
+			assert.equal(chatGPTModels().length, 1);
+
+			// 3 concurrent forced refreshes must also coalesce to 1 fetch
+			await Promise.all([
+				refreshConnectionCatalog("chatgpt", { force: true }),
+				refreshConnectionCatalog("chatgpt", { force: true }),
+				refreshConnectionCatalog("chatgpt", { force: true }),
+			]);
+			assert.equal(modelFetchCount, 2, "3 concurrent force refreshes must coalesce to 1 additional /v1/models fetch");
+
+			owner.close();
+			for (const sym of ["lh.webSubscriptions", "lh.chatgpt.bridge", "lh.modelCatalog.refreshCache", "lh.webSubscriptionRuntime"]) {
+				Reflect.deleteProperty(globalThis, Symbol.for(sym));
+			}
+		} finally {
+			globalThis.fetch = realFetch;
+			if (effectiveCredPath !== credPath) {
+				if (prevCredBytes) await fs.writeFile(effectiveCredPath, prevCredBytes, { mode: 0o600 });
+				else await fs.rm(effectiveCredPath, { force: true });
+			}
+			if (prevAuth === undefined) delete process.env.LH_AUTH_FILE; else process.env.LH_AUTH_FILE = prevAuth;
+			if (prevData === undefined) delete process.env.LH_DATA_DIR; else process.env.LH_DATA_DIR = prevData;
+			if (prevDesktop === undefined) delete process.env.LH_DESKTOP_SERVER; else process.env.LH_DESKTOP_SERVER = prevDesktop;
+			if (prevSecret === undefined) delete process.env.LH_DESKTOP_API_SECRET; else process.env.LH_DESKTOP_API_SECRET = prevSecret;
+		}
+	});
+
+	it("allows loopback OAuth & API overrides strictly in test/LH_IGNORE_ENV_KEYS mode and ignores non-loopback or production overrides", async () => {
+		const env = process.env as Record<string, string | undefined>;
+		const prevNodeEnv = env.NODE_ENV;
+		const prevIgnore = env.LH_IGNORE_ENV_KEYS;
+		const prevIssuer = env.LH_CHATGPT_OAUTH_ISSUER;
+		const prevApi = env.LH_CHATGPT_API_BASE;
+
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "lh-loopback-seam-"));
+		tempDirs.push(dir);
+		const credPath = path.join(dir, "chatgpt-credentials.json");
+
+		try {
+			// 1. Loopback http://127.0.0.1 & http://localhost & http://[::1] work when NODE_ENV=test
+			env.NODE_ENV = "test";
+			delete env.LH_IGNORE_ENV_KEYS;
+			env.LH_CHATGPT_OAUTH_ISSUER = "http://127.0.0.1:43210";
+			env.LH_CHATGPT_API_BASE = "http://127.0.0.1:43210/v1";
+
+			const fetchedUrls: string[] = [];
+			const svc = createChatGPT({
+				store: fileStore(credPath),
+				openExternal: async () => {},
+				fetch: async (target: string, init: RequestInit = {}) => {
+					fetchedUrls.push(target);
+					if (target === "http://127.0.0.1:43210/.well-known/jwks.json") return Response.json({ keys: [jwk] });
+					if (target === "http://127.0.0.1:43210/api/accounts/oauth/token") {
+						const form = init.body as URLSearchParams;
+						assert.equal(form.get("resource"), "http://127.0.0.1:43210/v1");
+						const nonce = new URL(started.authorizeUrl).searchParams.get("nonce")!;
+						const idToken = await new SignJWT({ nonce, email: "loopback@example.invalid" })
+							.setProtectedHeader({ alg: "RS256", kid: "headless-key" })
+							.setIssuer("http://127.0.0.1:43210")
+							.setSubject("loopback-sub")
+							.setAudience(form.get("client_id")!)
+							.setIssuedAt()
+							.setExpirationTime("1h")
+							.sign(privateKey);
+						return Response.json({
+							access_token: "loopback-access",
+							refresh_token: "loopback-refresh",
+							id_token: idToken,
+							token_type: "Bearer",
+							expires_in: 3600,
+							scope: SCOPES.join(" "),
+						});
+					}
+					if (target === "http://127.0.0.1:43210/v1/models") {
+						return Response.json({ models: [{ slug: "gpt-loopback", display_name: "GPT Loopback", visibility: "list" }] });
+					}
+					throw new Error(`Unexpected fetch: ${target}`);
+				},
+			});
+			let started!: { authorizeUrl: string; redirectUri: string; status: any };
+			try {
+				started = await svc.startHeadlessAuth();
+				assert.equal(new URL(started.authorizeUrl).origin, "http://127.0.0.1:43210");
+				assert.equal(new URL(started.authorizeUrl).searchParams.get("resource"), "http://127.0.0.1:43210/v1");
+				const done = await svc.completeHeadlessAuth(
+					`${started.redirectUri}?code=lb-code&state=${new URL(started.authorizeUrl).searchParams.get("state")}&client_id=oaiapp_lb`,
+				);
+				assert.equal(done.accounts[0]?.connected, true);
+				const cat = await svc.models();
+				assert.equal(cat.models[0]?.id, "gpt-loopback");
+				assert.ok(fetchedUrls.includes("http://127.0.0.1:43210/v1/models"));
+			} finally {
+				svc.close();
+			}
+
+			// 2. Non-loopback, https:, userinfo, or production mode without LH_IGNORE_ENV_KEYS must be ignored
+			for (const badIssuer of [
+				"https://evil.com",
+				"https://127.0.0.1:43210",
+				"http://192.168.1.10:43210",
+				"http://localhost.evil.com:43210",
+				"http://user@127.0.0.1:43210",
+				"http://127.0.0.1:43210/extra-path",
+			]) {
+				env.NODE_ENV = "test";
+				env.LH_CHATGPT_OAUTH_ISSUER = badIssuer;
+				const svcBad = createChatGPT({
+					store: fileStore(path.join(dir, "bad.json")),
+					openExternal: async () => {},
+					fetch: async () => Response.json({ models: [] }),
+				});
+				try {
+					const st = await svcBad.startHeadlessAuth();
+					assert.equal(new URL(st.authorizeUrl).origin, "https://auth.openai.com", `must ignore ${badIssuer}`);
+				} finally {
+					svcBad.close();
+				}
+			}
+
+			// Production NODE_ENV without LH_IGNORE_ENV_KEYS=1 ignores even loopback override
+			env.NODE_ENV = "production";
+			delete env.LH_IGNORE_ENV_KEYS;
+			env.LH_CHATGPT_OAUTH_ISSUER = "http://localhost:43210";
+			const svcProd = createChatGPT({
+				store: fileStore(path.join(dir, "prod.json")),
+				openExternal: async () => {},
+				fetch: async () => Response.json({ models: [] }),
+			});
+			try {
+				const st = await svcProd.startHeadlessAuth();
+				assert.equal(new URL(st.authorizeUrl).origin, "https://auth.openai.com");
+			} finally {
+				svcProd.close();
+			}
+
+			// LH_IGNORE_ENV_KEYS=1 with [::1] enables loopback override even if NODE_ENV=production
+			env.LH_IGNORE_ENV_KEYS = "1";
+			env.LH_CHATGPT_OAUTH_ISSUER = "http://[::1]:43210";
+			const svcV6 = createChatGPT({
+				store: fileStore(path.join(dir, "v6.json")),
+				openExternal: async () => {},
+				fetch: async () => Response.json({ models: [] }),
+			});
+			try {
+				const st = await svcV6.startHeadlessAuth();
+				assert.equal(new URL(st.authorizeUrl).origin, "http://[::1]:43210");
+			} finally {
+				svcV6.close();
+			}
+		} finally {
+			if (prevNodeEnv === undefined) delete env.NODE_ENV; else env.NODE_ENV = prevNodeEnv;
+			if (prevIgnore === undefined) delete env.LH_IGNORE_ENV_KEYS; else env.LH_IGNORE_ENV_KEYS = prevIgnore;
+			if (prevIssuer === undefined) delete env.LH_CHATGPT_OAUTH_ISSUER; else env.LH_CHATGPT_OAUTH_ISSUER = prevIssuer;
+			if (prevApi === undefined) delete env.LH_CHATGPT_API_BASE; else env.LH_CHATGPT_API_BASE = prevApi;
+		}
+	});
 });

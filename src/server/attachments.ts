@@ -17,7 +17,7 @@ import {
 } from "../core/contracts/attachments.ts";
 import { writeFileAtomicSync } from "../store/atomic-write.ts";
 
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const PDF_MAGIC = Buffer.from("%PDF-", "ascii");
 
 export interface StoreAttachmentInput {
 	bytes: Uint8Array;
@@ -41,15 +41,17 @@ export function detectAttachmentMimeType(bytes: Uint8Array): AttachmentMimeType 
 	if (imageMime === "image/png" || imageMime === "image/jpeg" || imageMime === "image/webp" || imageMime === "image/gif") {
 		return imageMime;
 	}
-	// Permit APNGs carrying a valid 8-byte PNG signature + IHDR chunk.
-	if (bytes.byteLength >= 16 && Buffer.from(bytes.subarray(0, 8)).equals(PNG_MAGIC)) {
-		const ihdrLen = Buffer.from(bytes.subarray(8, 12)).readUInt32BE(0);
-		if (ihdrLen === 13 && Buffer.from(bytes.subarray(12, 16)).toString("ascii") === "IHDR") {
-			return "image/png";
-		}
+	// Accept PDF magic header only at start (after optional UTF-8 BOM / ASCII whitespace),
+	// rejecting HTML/script polyglot prefixes before %PDF-.
+	const limit = Math.min(bytes.byteLength, 1024);
+	let offset = 0;
+	if (limit >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+		offset = 3;
 	}
-	const head = Buffer.from(bytes.subarray(0, Math.min(bytes.byteLength, 1024)));
-	if (head.includes("%PDF-")) {
+	while (offset < limit && (bytes[offset] === 0x20 || bytes[offset] === 0x09 || bytes[offset] === 0x0a || bytes[offset] === 0x0d)) {
+		offset++;
+	}
+	if (limit - offset >= PDF_MAGIC.byteLength && Buffer.from(bytes.subarray(offset, offset + PDF_MAGIC.byteLength)).equals(PDF_MAGIC)) {
 		return "application/pdf";
 	}
 	return null;
@@ -255,6 +257,7 @@ export function attachmentResponseHeaders(meta: AttachmentMetaRecord): Record<st
 		"Content-Length": String(meta.sizeBytes),
 		"Content-Disposition": `inline; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`,
 		"X-Content-Type-Options": "nosniff",
+		"Content-Security-Policy": "default-src 'none'; sandbox",
 		"Cache-Control": "private, no-store",
 	};
 }

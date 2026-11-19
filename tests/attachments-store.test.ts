@@ -51,12 +51,22 @@ afterEach(() => {
 });
 
 describe("Attachment contracts & server storage", () => {
-	it("sanitizes Windows paths, traversal, control chars, and missing extensions", () => {
+	it("sanitizes Windows paths, traversal, reserved Win32 device names, control chars, and missing extensions", () => {
 		assert.equal(sanitizeAttachmentFilename("C:\\Users\\Alice\\notes\\fig?1*.png", "image/png"), "fig_1_.png");
 		assert.equal(sanitizeAttachmentFilename("../../etc/passwd", "application/pdf"), "passwd.pdf");
 		assert.equal(sanitizeAttachmentFilename("..", "image/jpeg"), "attachment.jpg");
 		assert.equal(sanitizeAttachmentFilename("  \x00\x1f  ", "image/webp"), "attachment.webp");
 		assert.equal(sanitizeAttachmentFilename("diagram", "image/gif"), "diagram.gif");
+		assert.equal(sanitizeAttachmentFilename("C:\\Users\\Alice\\..\\secret\\CON.png", "image/png"), "attachment.png");
+		assert.equal(sanitizeAttachmentFilename("NUL", "image/png"), "attachment.png");
+		assert.equal(sanitizeAttachmentFilename("nul.pdf", "application/pdf"), "attachment.pdf");
+		assert.equal(sanitizeAttachmentFilename("PRN.pdf", "application/pdf"), "attachment.pdf");
+		assert.equal(sanitizeAttachmentFilename("AUX.jpg", "image/jpeg"), "attachment.jpg");
+		assert.equal(sanitizeAttachmentFilename("COM1.png", "image/png"), "attachment.png");
+		assert.equal(sanitizeAttachmentFilename("lpt9.webp", "image/webp"), "attachment.webp");
+		assert.equal(sanitizeAttachmentFilename("CON.tar.png", "image/png"), "attachment.png");
+		assert.equal(sanitizeAttachmentFilename("cone.png", "image/png"), "cone.png");
+		assert.equal(sanitizeAttachmentFilename("com10.png", "image/png"), "com10.png");
 	});
 
 	it("stores PNG, JPEG, WebP, GIF, and PDF deterministically by SHA-256 and deduplicates", () => {
@@ -108,6 +118,7 @@ describe("Attachment contracts & server storage", () => {
 			const headers = attachmentResponseHeaders(loaded.meta);
 			assert.equal(headers["Content-Type"], item.mimeType);
 			assert.equal(headers["X-Content-Type-Options"], "nosniff");
+			assert.equal(headers["Content-Security-Policy"], "default-src 'none'; sandbox");
 			assert.equal(headers["Cache-Control"], "private, no-store");
 		}
 	});
@@ -128,6 +139,28 @@ describe("Attachment contracts & server storage", () => {
 			/Unsupported/i,
 		);
 		assert.equal(detectAttachmentMimeType(Buffer.from("BM\x20\x00\x00\x00")), null);
+		assert.equal(
+			detectAttachmentMimeType(Buffer.from("<!DOCTYPE html><script>alert(1)</script><!-- %PDF-1.4 --></html>")),
+			null,
+		);
+		assert.throws(
+			() =>
+				storeAttachment({
+					bytes: Buffer.from("<!DOCTYPE html><script>alert(1)</script><!-- %PDF-1.4 --></html>"),
+					filename: "polyglot.pdf",
+					mimeType: "application/pdf",
+					dataDir,
+				}),
+			/Unsupported/i,
+		);
+		assert.equal(detectAttachmentMimeType(Buffer.from("  \n%PDF-1.4\n")), "application/pdf");
+
+		// APNG (acTL before IDAT) must be rejected consistently with detectSupportedImageMimeType
+		const acTL = Buffer.alloc(20);
+		acTL.writeUInt32BE(8, 0);
+		acTL.write("acTL", 4);
+		const apng = Buffer.concat([PNG_1X1.subarray(0, 33), acTL, PNG_1X1.subarray(33)]);
+		assert.equal(detectAttachmentMimeType(apng), null);
 
 		const huge = Buffer.alloc(MAX_ATTACHMENT_IMAGE_BYTES + 1, 0);
 		PNG_1X1.copy(huge, 0, 0, 24);

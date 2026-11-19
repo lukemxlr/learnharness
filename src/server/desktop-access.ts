@@ -76,48 +76,49 @@ export function desktopAPIAuthorized(
 	return actual.length === wanted.length && timingSafeEqual(actual, wanted);
 }
 
+function parseValidatedHost(
+	proto: "http:" | "https:",
+	host: string | null | undefined,
+): URL | undefined {
+	if (!host || /[\s@?#\/\\]/.test(host)) return undefined;
+	try {
+		const parsed = new URL(`${proto}//${host}`);
+		if (
+			!["http:", "https:"].includes(parsed.protocol) ||
+			parsed.username ||
+			parsed.password ||
+			parsed.pathname !== "/" ||
+			parsed.search ||
+			parsed.hash ||
+			!parsed.hostname
+		) {
+			return undefined;
+		}
+		return parsed;
+	} catch {
+		return undefined;
+	}
+}
+
 /** Same-origin browser controls, honoring X-Forwarded-Proto/Host only when
  * LH_TRUST_PROXY=1 is explicitly enabled behind a trusted reverse proxy. */
 export function subscriptionRequestOrigin(
 	request: Request,
 	env: Record<string, string | undefined> = process.env,
 ): string | undefined {
-	try {
-		const proto = effectiveRequestProto(request, env);
-		const host = effectiveRequestHost(request, env);
-		if (!proto || !host || /\s/.test(host)) return;
-		const addressed = new URL(`${proto}//${host}`);
-		if (
-			!["http:", "https:"].includes(addressed.protocol) ||
-			addressed.username ||
-			addressed.password ||
-			addressed.pathname !== "/" ||
-			addressed.search ||
-			addressed.hash
-		) {
-			return;
-		}
-		return addressed.origin;
-	} catch {
-		return;
-	}
+	const proto = effectiveRequestProto(request, env);
+	if (!proto) return;
+	const host = effectiveRequestHost(request, env);
+	return parseValidatedHost(proto, host)?.origin;
 }
 
 /** DNS rebinding needs an attacker-owned DNS name, so localhost names and IP
  * literals are always safe. Any other name must be listed in LH_ALLOWED_HOSTS
  * (comma-separated, case-insensitive, port ignored). */
 export function browserHostAllowed(host: string | null | undefined, env: Record<string, string | undefined> = process.env): boolean {
-	if (!host || /\s/.test(host)) return false;
-	let hostname: string;
-	try {
-		const parsed = new URL(`http://${host}`);
-		if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
-			return false;
-		}
-		hostname = parsed.hostname.toLowerCase();
-	} catch {
-		return false;
-	}
+	const parsed = parseValidatedHost("http:", host);
+	if (!parsed) return false;
+	const hostname = parsed.hostname.toLowerCase();
 	if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
 	if (isIP(hostname.replace(/^\[|\]$/g, "")) !== 0) return true;
 	const allowed = (env.LH_ALLOWED_HOSTS ?? "").split(",").map((name) => name.trim().toLowerCase()).filter(Boolean);

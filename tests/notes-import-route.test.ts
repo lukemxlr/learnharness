@@ -26,7 +26,7 @@ it("route keeps three-worker batching, request positions and mixed per-file outc
 	extraction.importNotes = async ({ filePath }) => {
 		active++; peak = Math.max(peak, active);
 		try {
-			await new Promise((resolve) => setTimeout(resolve, filePath === "slow.md" ? 25 : 1));
+			await new Promise((resolve) => setTimeout(resolve, filePath === "slow.md" ? 200 : 1));
 			if (filePath === "models.md") throw new ModelsNotConfiguredError(["cheap"]);
 			if (filePath === "key.md") throw new ProviderKeyMissingError("openai", ["cheap"]);
 			if (filePath in outcomeOf) throw new NotesImportError(outcomeOf[filePath]!, { nodes: 2, chains: 1 }, `synthetic ${filePath}`);

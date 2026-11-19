@@ -59,7 +59,7 @@ describe("learner-image smoke owned lifetimes", () => {
 				server.once("error", error => { clearTimeout(timeout); reject(error); });
 				server.stdout.on("data", chunk => { if (String(chunk).includes("READY")) { clearTimeout(timeout); resolve(); } });
 			});
-			assert.deepEqual(await stopOwnedSmokeServer(server, { graceMs: 100, killMs: 3000 }), { escalated: true });
+			assert.deepEqual(await stopOwnedSmokeServer(server, { graceMs: 500, killMs: 3000 }), { escalated: true });
 			assert.equal((await exited)[0], 0, "the TERM-handling leader exited normally before descendant escalation");
 			assert.throws(() => process.kill(-server.pid!, 0), { code: "ESRCH" });
 			assert.deepEqual(await stopOwnedSmokeServer(server, { graceMs: 100, killMs: 3000 }), { escalated: false });

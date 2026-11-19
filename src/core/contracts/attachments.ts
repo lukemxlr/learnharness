@@ -84,6 +84,8 @@ export function attachmentUrl(id: string): string {
 	return `/api/attachments/${id}`;
 }
 
+const WIN32_RESERVED_STEM_RE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+
 export function sanitizeAttachmentFilename(raw: string, mimeType: AttachmentMimeType): string {
 	const defaultExt = MIME_EXTENSIONS[mimeType];
 	const rawBase = (raw.split(/[\\/]/).pop() ?? "")
@@ -106,7 +108,7 @@ export function sanitizeAttachmentFilename(raw: string, mimeType: AttachmentMime
 		? rawBase.slice(lastDot + 1).replace(/[^a-zA-Z0-9]/g, "").toLowerCase().slice(0, 12)
 		: defaultExt;
 
-	if (!stem) stem = "attachment";
+	if (!stem || WIN32_RESERVED_STEM_RE.test(stem)) stem = "attachment";
 	if (!ext) ext = defaultExt;
 	if (stem.length > 120) stem = stem.slice(0, 120).replace(/[.\s]+$/g, "") || "attachment";
 	return `${stem}.${ext}`;

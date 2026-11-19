@@ -82,11 +82,40 @@ describe("Reverse proxy trust & Cloudflare Tunnel support (F3)", () => {
 		assert.equal(browserAPIRefusal(lanReq, env), undefined);
 	});
 
-	it("hardens browserHostAllowed against userinfo, path, query, fragment, and malformed X-Forwarded-Proto", () => {
+	it("hardens browserHostAllowed against userinfo, path, query, fragment, malformed delimiters, and X-Forwarded-Proto", () => {
 		assert.equal(browserHostAllowed("user:pass@localhost:3000", {}), false);
+		assert.equal(browserHostAllowed("@localhost:3000", {}), false);
+		assert.equal(browserHostAllowed(":@localhost:3000", {}), false);
+		assert.equal(browserHostAllowed("@allowed.example", { LH_ALLOWED_HOSTS: "allowed.example" }), false);
+		assert.equal(browserHostAllowed("localhost:3000?", {}), false);
+		assert.equal(browserHostAllowed("localhost:3000#", {}), false);
 		assert.equal(browserHostAllowed("localhost/path", {}), false);
+		assert.equal(browserHostAllowed("localhost\\path", {}), false);
 		assert.equal(browserHostAllowed("localhost?q=1", {}), false);
 		assert.equal(browserHostAllowed("localhost#frag", {}), false);
+		assert.equal(browserHostAllowed("[::1]:3000", {}), true);
+		assert.equal(browserHostAllowed("allowed.example", { LH_ALLOWED_HOSTS: "allowed.example" }), true);
+
+		for (const badHost of ["@localhost:3000", ":@localhost:3000", "@allowed.example", "localhost:3000?", "localhost:3000#"]) {
+			const req = new Request("http://127.0.0.1:3000/api/chats", {
+				method: "POST",
+				headers: {
+					host: "127.0.0.1:3000",
+					"x-forwarded-host": badHost,
+					"x-forwarded-proto": "https",
+				},
+			});
+			assert.equal(
+				subscriptionRequestOrigin(req, { LH_TRUST_PROXY: "1", LH_ALLOWED_HOSTS: "allowed.example" }),
+				undefined,
+				`subscriptionRequestOrigin(${badHost})`,
+			);
+			assert.match(
+				browserAPIRefusal(req, { LH_TRUST_PROXY: "1", LH_ALLOWED_HOSTS: "allowed.example" }) ?? "",
+				/not allowed/,
+				`browserAPIRefusal(${badHost})`,
+			);
+		}
 
 		const badProto = new Request("http://127.0.0.1:3000/api/chats", {
 			method: "POST",

@@ -60,10 +60,17 @@ afterEach(() => {
 describe("Single-account auth contracts & CLI (F4)", () => {
 	it("sanitizes post-login next paths against open redirects", () => {
 		assert.equal(sanitizeNextPath("/chat/abc?x=1"), "/chat/abc?x=1");
+		assert.equal(sanitizeNextPath("/chat/a/../b?x=1#h"), "/chat/b?x=1#h");
 		assert.equal(sanitizeNextPath("/"), "/");
 		assert.equal(sanitizeNextPath("https://evil.example"), "/");
 		assert.equal(sanitizeNextPath("//evil.example/path"), "/");
 		assert.equal(sanitizeNextPath("/\\evil.example"), "/");
+		assert.equal(sanitizeNextPath("/..//evil.com"), "/");
+		assert.equal(sanitizeNextPath("/.//evil.com"), "/");
+		assert.equal(sanitizeNextPath("/a/..//evil.com"), "/");
+		assert.equal(sanitizeNextPath("/a/../..//evil.com"), "/");
+		assert.equal(sanitizeNextPath("/..//evil.com/path?x=1#y"), "/");
+		assert.equal(sanitizeNextPath("///evil.com"), "/");
 		assert.equal(sanitizeNextPath("javascript:alert(1)"), "/");
 		assert.equal(sanitizeNextPath(undefined), "/");
 	});

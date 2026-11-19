@@ -5,6 +5,11 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $ImageName = if ($env:LH_DOCKER_IMAGE) { $env:LH_DOCKER_IMAGE } else { "learnharness-test:node26" }
+$TestConcurrency = if ($env:LH_TEST_CONCURRENCY) { $env:LH_TEST_CONCURRENCY } else { "4" }
+if ($TestConcurrency -notmatch '^[1-9][0-9]*$') {
+    Write-Error "Invalid LH_TEST_CONCURRENCY '$TestConcurrency' (expected positive integer)."
+    exit 2
+}
 
 function Invoke-DockerBuild {
     Write-Host "[docker-test] Building image $ImageName from docker/Dockerfile.test..."
@@ -74,7 +79,9 @@ switch ($Command) {
     "test" {
         if ($Rest -and $Rest.Count -gt 0) {
             $escaped = Escape-BashArgs $Rest
-            Invoke-InContainer "NODE_ENV=test ./node_modules/.bin/tsx --test $escaped"
+            Invoke-InContainer "NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=$TestConcurrency $escaped"
+        } elseif ($env:LH_TEST_CONCURRENCY) {
+            Invoke-InContainer "NODE_ENV=test ./node_modules/.bin/tsx --test --test-concurrency=$TestConcurrency tests/*.test.ts tests/*.test.tsx"
         } else {
             Invoke-InContainer "npm test"
         }
