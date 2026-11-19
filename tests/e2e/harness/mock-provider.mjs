@@ -38,7 +38,7 @@ function readRawBody(req) {
 }
 
 function parseDataUrl(url) {
-	const match = /^data:([^;,]+);base64,(.+)$/is.exec(url);
+	const match = /^data:([^;,]+)(?:;[^,]*)*;base64,(.+)$/is.exec(url);
 	if (!match) return { url };
 	const buf = Buffer.from(match[2], "base64");
 	return {
@@ -60,8 +60,12 @@ function extractImages(value, out = []) {
 		if (typeof value.image_url.url === "string") {
 			out.push(parseDataUrl(value.image_url.url));
 		}
-	} else if (value.type === "input_image" && typeof value.image_url === "string") {
-		out.push(parseDataUrl(value.image_url));
+	} else if (value.type === "input_image") {
+		if (typeof value.image_url === "string") {
+			out.push(parseDataUrl(value.image_url));
+		} else if (value.image_url && typeof value.image_url === "object" && typeof value.image_url.url === "string") {
+			out.push(parseDataUrl(value.image_url.url));
+		}
 	} else if (value.type === "image" && typeof value.data === "string") {
 		const buf = Buffer.from(value.data, "base64");
 		out.push({
@@ -78,24 +82,26 @@ function extractImages(value, out = []) {
 	return out;
 }
 
+function collectItemText(content) {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		const parts = [];
+		for (const part of content) {
+			if (typeof part === "string") parts.push(part);
+			else if (part && typeof part === "object" && typeof part.text === "string") parts.push(part.text);
+		}
+		return parts.join("\n");
+	}
+	return "";
+}
+
 function extractUserTexts(body) {
 	const texts = [];
-	const collectText = (content) => {
-		if (typeof content === "string") {
-			texts.push(content);
-		} else if (Array.isArray(content)) {
-			for (const part of content) {
-				if (typeof part === "string") texts.push(part);
-				else if (part && typeof part === "object" && typeof part.text === "string") texts.push(part.text);
-			}
-		}
-	};
-
 	if (Array.isArray(body.messages)) {
 		for (const msg of body.messages) {
 			if (!msg || typeof msg !== "object") continue;
 			if (msg.role === "user" || msg.role === "tool") {
-				collectText(msg.content);
+				texts.push(collectItemText(msg.content));
 			}
 		}
 	}
@@ -105,11 +111,95 @@ function extractUserTexts(body) {
 		for (const item of body.input) {
 			if (!item || typeof item !== "object") continue;
 			if (item.role === "user" || item.type === "function_call_output") {
-				collectText(item.content ?? item.output);
+				texts.push(collectItemText(item.content ?? item.output));
 			}
 		}
 	}
 	return texts;
+}
+
+function extractLatestTurnText(body) {
+	const trailing = [];
+	if (Array.isArray(body.messages)) {
+		let lastAssistantIdx = -1;
+		for (let i = body.messages.length - 1; i >= 0; i--) {
+			const msg = body.messages[i];
+			if (msg && typeof msg === "object" && msg.role === "assistant") {
+				lastAssistantIdx = i;
+				break;
+			}
+		}
+		for (let i = lastAssistantIdx + 1; i < body.messages.length; i++) {
+			const msg = body.messages[i];
+			if (!msg || typeof msg !== "object") continue;
+			if (msg.role === "user" || msg.role === "tool") {
+				const txt = collectItemText(msg.content);
+				if (txt) trailing.push(txt);
+			}
+		}
+	}
+	if (typeof body.input === "string") {
+		if (body.input) trailing.push(body.input);
+	} else if (Array.isArray(body.input)) {
+		let lastModelIdx = -1;
+		for (let i = body.input.length - 1; i >= 0; i--) {
+			const item = body.input[i];
+			if (item && typeof item === "object" && (item.role === "assistant" || item.type === "function_call")) {
+				lastModelIdx = i;
+				break;
+			}
+		}
+		for (let i = lastModelIdx + 1; i < body.input.length; i++) {
+			const item = body.input[i];
+			if (!item || typeof item !== "object") continue;
+			if (item.role === "user" || item.type === "function_call_output") {
+				const txt = collectItemText(item.content ?? item.output);
+				if (txt) trailing.push(txt);
+			}
+		}
+	}
+	return trailing.join("\n");
+}
+
+function extractLatestTurnImages(body) {
+	const out = [];
+	if (Array.isArray(body.messages)) {
+		let lastAssistantIdx = -1;
+		for (let i = body.messages.length - 1; i >= 0; i--) {
+			const msg = body.messages[i];
+			if (msg && typeof msg === "object" && msg.role === "assistant") {
+				lastAssistantIdx = i;
+				break;
+			}
+		}
+		for (let i = lastAssistantIdx + 1; i < body.messages.length; i++) {
+			const msg = body.messages[i];
+			if (!msg || typeof msg !== "object") continue;
+			if (msg.role === "user" || msg.role === "tool") {
+				extractImages(msg.content, out);
+			}
+		}
+	}
+	if (Array.isArray(body.input)) {
+		let lastModelIdx = -1;
+		for (let i = body.input.length - 1; i >= 0; i--) {
+			const item = body.input[i];
+			if (item && typeof item === "object" && (item.role === "assistant" || item.type === "function_call")) {
+				lastModelIdx = i;
+				break;
+			}
+		}
+		for (let i = lastModelIdx + 1; i < body.input.length; i++) {
+			const item = body.input[i];
+			if (!item || typeof item !== "object") continue;
+			if (item.role === "user" || item.type === "function_call_output") {
+				extractImages(item.content ?? item.output, out);
+			} else if (item.type === "input_image") {
+				extractImages(item, out);
+			}
+		}
+	}
+	return out;
 }
 
 function findToolSchema(tools, name) {
@@ -117,24 +207,31 @@ function findToolSchema(tools, name) {
 	for (const tool of tools) {
 		if (!tool || typeof tool !== "object") continue;
 		if (tool.type === "function" && tool.function?.name === name) return tool.function;
-		if (tool.name === name) return tool;
+		if (tool.name === name && tool.type !== "namespace") return tool;
+		if (tool.type === "namespace" && Array.isArray(tool.tools)) {
+			const nested = findToolSchema(tool.tools, name);
+			if (nested) return nested;
+		}
 	}
 	return null;
 }
 
-function toolAcceptsNodeId(toolDef) {
+function toolSchemaProps(toolDef) {
 	const props = toolDef?.parameters?.properties;
-	return Boolean(props && typeof props === "object" && ("nodeId" in props || "type" in props));
+	return props && typeof props === "object" ? props : {};
 }
 
-function buildDeterministicAction(body, images, userTexts) {
-	const latestText = userTexts.length > 0 ? userTexts[userTexts.length - 1] : "";
-	const joinedText = userTexts.join("\n");
+function buildDeterministicAction(body, images, latestTurnText) {
+	const latestText = latestTurnText || "";
 
-	if (latestText.includes("[TRIGGER_MC]") || joinedText.includes("[TRIGGER_MC]")) {
+	if (latestText.includes("[TRIGGER_MC]")) {
 		const quizTool = findToolSchema(body.tools, "quiz");
+		const probeTool = findToolSchema(body.tools, "probe");
+		const selectedName = quizTool ? "quiz" : probeTool ? "probe" : "quiz";
+		const props = toolSchemaProps(quizTool || probeTool);
 		const args = {
-			...(toolAcceptsNodeId(quizTool) ? { type: "predict", nodeId: "root" } : {}),
+			...("type" in props ? { type: "predict" } : {}),
+			...("nodeId" in props ? { nodeId: "root" } : {}),
 			question: "In projectile motion near Earth's surface (ignoring air resistance), what is the vertical acceleration at the highest point?",
 			options: [
 				{ label: "Zero", value: "zero" },
@@ -145,30 +242,39 @@ function buildDeterministicAction(body, images, userTexts) {
 			explanation: "Gravity acts continuously downward with constant acceleration g throughout the trajectory, including at the peak.",
 			correctAnswer: "g_downward",
 		};
-		return { kind: "tool_call", name: "quiz", arguments: args };
+		return { kind: "tool_call", name: selectedName, arguments: args };
 	}
 
-	if (latestText.includes("[TRIGGER_FREE]") || joinedText.includes("[TRIGGER_FREE]")) {
+	if (latestText.includes("[TRIGGER_FREE]")) {
 		const explainTool = findToolSchema(body.tools, "explain");
-		if (explainTool) {
+		const recallTool = findToolSchema(body.tools, "recall");
+		const freeTool = explainTool || recallTool;
+		if (freeTool) {
+			const selectedName = explainTool ? "explain" : "recall";
+			const props = toolSchemaProps(freeTool);
 			const args = {
-				...(toolAcceptsNodeId(explainTool) ? { type: "predict", nodeId: "root" } : {}),
+				...("type" in props ? { type: "predict" } : {}),
+				...("nodeId" in props ? { nodeId: "root" } : {}),
 				question: "Explain why the horizontal and vertical components of projectile motion can be analyzed independently.",
 				correctAnswer: "Gravity acts solely vertically, so horizontal acceleration is zero while vertical acceleration is -g; orthogonal axes do not couple.",
 			};
-			return { kind: "tool_call", name: "explain", arguments: args };
+			return { kind: "tool_call", name: selectedName, arguments: args };
 		}
+		const askTool = findToolSchema(body.tools, "ask_user_question");
+		const askProps = toolSchemaProps(askTool);
 		return {
 			kind: "tool_call",
 			name: "ask_user_question",
 			arguments: {
 				question: "Explain why the horizontal and vertical components of projectile motion can be analyzed independently.",
-				details: "Provide a concise derivation or diagram.",
+				...("details" in askProps || !askTool
+					? { details: "Provide a concise derivation or diagram." }
+					: {}),
 			},
 		};
 	}
 
-	if (latestText.includes("[ECHO_VISION]") || joinedText.includes("[ECHO_VISION]")) {
+	if (latestText.includes("[ECHO_VISION]")) {
 		const bytesList = images.map((img) => img.byteLength ?? 0).join(",") || "0";
 		const shaList = images.map((img) => (img.sha256 ? img.sha256.slice(0, 12) : "none")).join(",") || "none";
 		return {
@@ -269,6 +375,7 @@ export async function startMockProvider(options = {}) {
 	const server = http.createServer(async (req, res) => {
 		const urlObj = new URL(req.url || "/", `http://${req.headers.host || `${host}:${port}`}`);
 		const pathname = urlObj.pathname;
+		const canonicalOrigin = `http://${host}:${server.address().port}`;
 		const origin = `http://${req.headers.host || `${host}:${server.address().port}`}`;
 
 		const sendJson = (status, data, extraHeaders = {}) => {
@@ -361,7 +468,8 @@ export async function startMockProvider(options = {}) {
 			if ((pathname === "/v1/chat/completions" || pathname === "/v1/responses") && req.method === "POST") {
 				const raw = await readRawBody(req);
 				const body = raw ? JSON.parse(raw) : {};
-				const images = extractImages(body);
+				const images = extractLatestTurnImages(body);
+				const allImages = extractImages(body);
 				const userTexts = extractUserTexts(body);
 
 				const entry = {
@@ -378,6 +486,7 @@ export async function startMockProvider(options = {}) {
 					input: body.input ?? null,
 					tools: body.tools ?? null,
 					images,
+					allImages,
 					userTexts,
 					rawBody: body,
 				};
@@ -405,9 +514,20 @@ export async function startMockProvider(options = {}) {
 								"Cache-Control": "no-cache",
 								Connection: "keep-alive",
 							});
-							res.write(`data: ${JSON.stringify({ id: `chatcmpl_${entry.seq}`, object: "chat.completion.chunk", model: entry.model || "gpt-test-1", choices: [{ index: 0, delta: { role: "assistant", content: "Partial before drop " }, finish_reason: null }] })}\n\n`);
+							const modelId = entry.model || "gpt-test-1";
+							if (pathname === "/v1/responses") {
+								const responseId = `resp_mock_${entry.seq}`;
+								const itemId = `msg_mock_${entry.seq}`;
+								res.write(`event: response.created\ndata: ${JSON.stringify({ type: "response.created", response: { id: responseId, object: "response", status: "in_progress", model: modelId, output: [] } })}\n\n`);
+								res.write(`event: response.output_item.added\ndata: ${JSON.stringify({ type: "response.output_item.added", output_index: 0, item: { id: itemId, type: "message", role: "assistant", status: "in_progress", content: [] } })}\n\n`);
+								res.write(`event: response.output_text.delta\ndata: ${JSON.stringify({ type: "response.output_text.delta", item_id: itemId, output_index: 0, content_index: 0, delta: "Partial before drop " })}\n\n`);
+							} else {
+								res.write(`data: ${JSON.stringify({ id: `chatcmpl_${entry.seq}`, object: "chat.completion.chunk", model: modelId, choices: [{ index: 0, delta: { role: "assistant", content: "Partial before drop " }, finish_reason: null }] })}\n\n`);
+							}
 							await sleep(20);
-							res.destroy(new Error("Mock injected mid-stream socket reset"));
+							if (!res.destroyed) {
+								res.destroy(new Error("Mock injected mid-stream socket reset"));
+							}
 							return;
 						}
 						return sendJson(fault.status || 500, fault.body || {
@@ -416,7 +536,7 @@ export async function startMockProvider(options = {}) {
 					}
 				}
 
-				const action = buildDeterministicAction(body, images, userTexts);
+				const action = buildDeterministicAction(body, images, extractLatestTurnText(body));
 				const modelId = entry.model || "gpt-test-1";
 				const completionId = `chatcmpl_mock_${entry.seq}`;
 				const created = Math.floor(Date.now() / 1000);
@@ -461,6 +581,7 @@ export async function startMockProvider(options = {}) {
 
 					let closed = false;
 					req.on("close", () => { closed = true; });
+					res.on("close", () => { closed = true; });
 
 					if (action.kind === "tool_call") {
 						const argStr = JSON.stringify(action.arguments);
@@ -511,11 +632,13 @@ export async function startMockProvider(options = {}) {
 							},
 						];
 						for (const frame of frames) {
-							if (closed) return;
+							if (closed || res.destroyed || res.writableEnded) return;
 							res.write(`data: ${JSON.stringify(frame)}\n\n`);
 						}
-						res.write("data: [DONE]\n\n");
-						res.end();
+						if (!closed && !res.destroyed && !res.writableEnded) {
+							res.write("data: [DONE]\n\n");
+							res.end();
+						}
 						return;
 					}
 
@@ -528,9 +651,9 @@ export async function startMockProvider(options = {}) {
 					})}\n\n`);
 
 					for (const chunk of action.chunks) {
-						if (closed) return;
+						if (closed || res.destroyed || res.writableEnded) return;
 						if (adminState.chunkDelayMs > 0) await sleep(adminState.chunkDelayMs);
-						if (closed) return;
+						if (closed || res.destroyed || res.writableEnded) return;
 						res.write(`data: ${JSON.stringify({
 							id: completionId,
 							object: "chat.completion.chunk",
@@ -540,7 +663,7 @@ export async function startMockProvider(options = {}) {
 						})}\n\n`);
 					}
 
-					if (!closed) {
+					if (!closed && !res.destroyed && !res.writableEnded) {
 						res.write(`data: ${JSON.stringify({
 							id: completionId,
 							object: "chat.completion.chunk",
@@ -590,9 +713,10 @@ export async function startMockProvider(options = {}) {
 				});
 				let closed = false;
 				req.on("close", () => { closed = true; });
+				res.on("close", () => { closed = true; });
 
 				const writeEvent = (eventName, dataObj) => {
-					if (closed) return;
+					if (closed || res.destroyed || res.writableEnded) return;
 					res.write(`event: ${eventName}\ndata: ${JSON.stringify(dataObj)}\n\n`);
 				};
 
@@ -618,7 +742,7 @@ export async function startMockProvider(options = {}) {
 						type: "response.completed",
 						response: { id: responseId, object: "response", status: "completed", model: modelId, output: [fcItem] },
 					});
-					res.end();
+					if (!closed && !res.destroyed && !res.writableEnded) res.end();
 					return;
 				}
 
@@ -629,9 +753,9 @@ export async function startMockProvider(options = {}) {
 				});
 				let fullText = "";
 				for (const chunk of action.chunks) {
-					if (closed) return;
+					if (closed || res.destroyed || res.writableEnded) return;
 					if (adminState.chunkDelayMs > 0) await sleep(adminState.chunkDelayMs);
-					if (closed) return;
+					if (closed || res.destroyed || res.writableEnded) return;
 					fullText += chunk;
 					writeEvent("response.output_text.delta", {
 						type: "response.output_text.delta",
@@ -641,7 +765,7 @@ export async function startMockProvider(options = {}) {
 						delta: chunk,
 					});
 				}
-				if (!closed) {
+				if (!closed && !res.destroyed && !res.writableEnded) {
 					const msgItem = {
 						id: itemId,
 						type: "message",
@@ -661,7 +785,7 @@ export async function startMockProvider(options = {}) {
 							usage: { input_tokens: 42, output_tokens: action.chunks.length * 4, total_tokens: 42 + action.chunks.length * 4 },
 						},
 					});
-					res.end();
+					if (!closed && !res.destroyed && !res.writableEnded) res.end();
 				}
 				return;
 			}
@@ -669,7 +793,7 @@ export async function startMockProvider(options = {}) {
 			// ── Mock OAuth PKCE & OIDC Discovery ──────────────────────────────────
 			if (pathname === "/.well-known/openid-configuration" && req.method === "GET") {
 				return sendJson(200, {
-					issuer: origin,
+					issuer: canonicalOrigin,
 					authorization_endpoint: `${origin}/__oauth/authorize`,
 					token_endpoint: `${origin}/__oauth/token`,
 					revocation_endpoint: `${origin}/__oauth/revoke`,
@@ -679,14 +803,22 @@ export async function startMockProvider(options = {}) {
 				});
 			}
 
-			if (pathname === "/__oauth/jwks.json" && req.method === "GET") {
+			if ((pathname === "/__oauth/jwks.json" || pathname === "/.well-known/jwks.json") && req.method === "GET") {
 				return sendJson(200, { keys: [publicJwk] });
 			}
 
-			if (pathname === "/__oauth/authorize" && req.method === "GET") {
-				const clientId = urlObj.searchParams.get("client_id") || "mock-client";
+			if ((pathname === "/__oauth/authorize" || pathname === "/api/accounts/authorize") && req.method === "GET") {
+				const requestedClientId = urlObj.searchParams.get("client_id");
+				const clientId =
+					!requestedClientId || requestedClientId === "dynamic_agent_client"
+						? "learnharness-mock-client"
+						: requestedClientId;
 				const redirectUri = urlObj.searchParams.get("redirect_uri") || "http://127.0.0.1/callback";
 				const state = urlObj.searchParams.get("state") || "";
+				const nonce = urlObj.searchParams.get("nonce") || undefined;
+				const scope =
+					urlObj.searchParams.get("scope") ||
+					"openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
 				const codeChallenge = urlObj.searchParams.get("code_challenge") || "";
 				const codeChallengeMethod = urlObj.searchParams.get("code_challenge_method") || "S256";
 				const mode = urlObj.searchParams.get("mode") || "redirect";
@@ -696,34 +828,55 @@ export async function startMockProvider(options = {}) {
 					return sendJson(400, { error: "invalid_request", error_description: "Missing or invalid PKCE S256 parameters" });
 				}
 
+				let cb;
+				try {
+					cb = new URL(redirectUri);
+				} catch {
+					return sendJson(400, { error: "invalid_request", error_description: "Malformed redirect_uri" });
+				}
+
 				const code = `mock_code_${randomBytes(12).toString("hex")}`;
 				authCodes.set(code, {
 					clientId,
 					redirectUri,
 					state,
+					nonce,
+					scope,
 					codeChallenge,
 					used: false,
 					expiresAt: Date.now() + adminState.codeTtlMs,
 				});
 
-				const cb = new URL(redirectUri);
 				cb.searchParams.set("code", code);
 				cb.searchParams.set("state", state);
+				cb.searchParams.set("client_id", clientId);
 
 				if (mode === "json") {
-					return sendJson(200, { code, state, callbackUrl: cb.toString() });
+					return sendJson(200, { code, state, client_id: clientId, callbackUrl: cb.toString() });
 				}
 				res.writeHead(302, { Location: cb.toString(), "Cache-Control": "no-store" });
 				res.end();
 				return;
 			}
 
-			if (pathname === "/__oauth/token" && req.method === "POST") {
+			if ((pathname === "/__oauth/token" || pathname === "/api/accounts/oauth/token") && req.method === "POST") {
 				const raw = await readRawBody(req);
 				const contentType = (req.headers["content-type"] || "").toLowerCase();
-				const params = contentType.includes("application/json")
-					? JSON.parse(raw || "{}")
-					: Object.fromEntries(new URLSearchParams(raw));
+				let params;
+				if (contentType.includes("application/json")) {
+					let parsed;
+					try {
+						parsed = JSON.parse(raw || "{}");
+					} catch {
+						return sendJson(400, { error: "invalid_request", error_description: "Malformed JSON request body" });
+					}
+					if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+						return sendJson(400, { error: "invalid_request", error_description: "Malformed JSON request body" });
+					}
+					params = parsed;
+				} else {
+					params = Object.fromEntries(new URLSearchParams(raw));
+				}
 
 				ledger.oauthRequests.push({ endpoint: pathname, grantType: params.grant_type });
 
@@ -732,6 +885,12 @@ export async function startMockProvider(options = {}) {
 				}
 
 				if (params.grant_type === "authorization_code") {
+					if (!params.client_id) {
+						return sendJson(400, { error: "invalid_request", error_description: "Missing client_id" });
+					}
+					if (!params.redirect_uri) {
+						return sendJson(400, { error: "invalid_request", error_description: "Missing redirect_uri" });
+					}
 					const record = authCodes.get(params.code);
 					if (!record || record.used) {
 						return sendJson(400, { error: "invalid_grant", error_description: "Invalid or used authorization code" });
@@ -739,10 +898,10 @@ export async function startMockProvider(options = {}) {
 					if (Date.now() > record.expiresAt) {
 						return sendJson(400, { error: "invalid_grant", error_description: "Authorization code expired" });
 					}
-					if (params.client_id !== undefined && params.client_id !== record.clientId) {
+					if (params.client_id !== record.clientId) {
 						return sendJson(400, { error: "invalid_grant", error_description: "client_id mismatch" });
 					}
-					if (params.redirect_uri !== undefined && params.redirect_uri !== record.redirectUri) {
+					if (params.redirect_uri !== record.redirectUri) {
 						return sendJson(400, { error: "invalid_grant", error_description: "redirect_uri mismatch" });
 					}
 					if (params.state !== undefined && params.state !== record.state) {
@@ -759,14 +918,15 @@ export async function startMockProvider(options = {}) {
 
 					const accessToken = `mock_at_${randomBytes(16).toString("hex")}`;
 					const refreshToken = `mock_rt_${randomBytes(16).toString("hex")}`;
-					refreshTokens.set(refreshToken, { clientId: record.clientId, revoked: false });
+					refreshTokens.set(refreshToken, { clientId: record.clientId, scope: record.scope, revoked: false });
 
 					const now = Math.floor(Date.now() / 1000);
 					const idToken = signMockJwt(
 						{
-							iss: origin,
+							iss: canonicalOrigin,
 							sub: "synth_sub_01",
 							aud: record.clientId,
+							...(record.nonce !== undefined ? { nonce: record.nonce } : {}),
 							email: "synthetic-learner@example.invalid",
 							iat: now,
 							exp: now + 3600,
@@ -785,7 +945,7 @@ export async function startMockProvider(options = {}) {
 						id_token: idToken,
 						token_type: "Bearer",
 						expires_in: 3600,
-						scope: "openid profile email offline_access",
+						scope: record.scope,
 					});
 				}
 
@@ -794,19 +954,26 @@ export async function startMockProvider(options = {}) {
 					if (!rt || rt.revoked) {
 						return sendJson(400, { error: "invalid_grant", error_description: "Refresh token revoked or unknown" });
 					}
+					if (params.client_id !== undefined && rt.clientId && params.client_id !== rt.clientId) {
+						return sendJson(400, { error: "invalid_grant", error_description: "client_id mismatch" });
+					}
 					const newAccess = `mock_at_${randomBytes(16).toString("hex")}`;
 					const newRefresh = `mock_rt_${randomBytes(16).toString("hex")}`;
 					rt.revoked = true;
-					refreshTokens.set(newRefresh, { clientId: rt.clientId, revoked: false });
+					refreshTokens.set(newRefresh, { clientId: rt.clientId, scope: rt.scope, revoked: false });
 					const now = Math.floor(Date.now() / 1000);
 					const idToken = signMockJwt(
 						{
-							iss: origin,
+							iss: canonicalOrigin,
 							sub: "synth_sub_01",
 							aud: rt.clientId,
 							email: "synthetic-learner@example.invalid",
 							iat: now,
 							exp: now + 3600,
+							"https://api.openai.com/auth": {
+								chatgpt_plan_type: "plus",
+								chatgpt_account_id: "acct_synth_01",
+							},
 						},
 						privateKey,
 						kid,
@@ -817,6 +984,7 @@ export async function startMockProvider(options = {}) {
 						id_token: idToken,
 						token_type: "Bearer",
 						expires_in: 3600,
+						...(rt.scope ? { scope: rt.scope } : {}),
 					});
 				}
 
@@ -869,7 +1037,11 @@ export async function startMockProvider(options = {}) {
 			await fetch(`${baseUrl}/__mock/requests`, { method: "DELETE" });
 		},
 		async close() {
-			await new Promise((resolve) => server.close(resolve));
+			if (!server.listening) return;
+			await new Promise((resolve) => {
+				server.close(resolve);
+				server.closeAllConnections?.();
+			});
 		},
 	};
 }

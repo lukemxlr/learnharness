@@ -3,6 +3,7 @@
 ## User guides
 
 - [Getting started](getting-started.md) — connections, models, sessions, dictation, files, and notes imports.
+- [Setup and operation](setup-and-operation.md) — Proxmox LXC server deployment, Cloudflare Tunnel, auth, headless ChatGPT OAuth, profile migration, Windows remote client, and iPad Safari usage.
 - [Keyboard shortcuts](keyboard.md) — defaults, rebinding, and navigation.
 - [Claude Code](claude-code.md) — use an installed CLI and troubleshoot its connection.
 - [Custom and local models](custom-providers.md) — configure an OpenAI-compatible endpoint.
@@ -13,6 +14,7 @@
 
 - [Development](development.md) — setup, configuration, safe local work, debugging, and checks.
 - [Architecture](architecture.md) — runtime flows, storage, and integration boundaries.
+- [Developer handover](developer-handover.md) — branch architecture decisions, data formats, Docker/E2E commands, viewport matrix, and open hardware/VM tasks.
 - [Prompt composition](../src/agent/prompts/README.md) — source fragments and user overrides.
 - [Tool-content recovery](tool-content-recovery.md) — display-only recovery of model-authored escaping defects.
 - [Desktop builds and releases](desktop-release.md) — packaging, release gates, and updates.

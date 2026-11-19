@@ -23,6 +23,9 @@ export LH_NODE26_BIN="$NODE26_BIN"
 
 BUILD_APP=0
 RUN_TIER1=0
+RUN_TIER2=0
+RUN_TIER3=0
+RUN_TIER4=0
 PW_ARGS=()
 
 for arg in "$@"; do
@@ -39,8 +42,20 @@ for arg in "$@"; do
     --tier1)
       RUN_TIER1=1
       ;;
+    --tier2)
+      RUN_TIER2=1
+      ;;
+    --tier3)
+      RUN_TIER3=1
+      ;;
+    --tier4)
+      RUN_TIER4=1
+      ;;
     --all)
       RUN_TIER1=0
+      RUN_TIER2=0
+      RUN_TIER3=0
+      RUN_TIER4=0
       PW_ARGS=()
       ;;
     *)
@@ -92,15 +107,29 @@ tar -C "$REPO_DIR/tests/e2e" --exclude="node_modules" --exclude="test-results" -
 ln -s "$E2E_MODULES" "$E2E_RUN_DIR/node_modules"
 
 cd "$E2E_RUN_DIR"
-if [[ "$RUN_TIER1" -eq 1 ]]; then
+add_tier_specs() {
+  local tier_name="$1"
+  local pattern="$2"
   shopt -s nullglob
-  TIER1_SPECS=(specs/tier1-*.spec.mjs)
+  local matched=($pattern)
   shopt -u nullglob
-  if [[ "${#TIER1_SPECS[@]}" -eq 0 ]]; then
-    echo "[e2e] ERROR: No tier1 specs found in $E2E_RUN_DIR/specs" >&2
+  if [[ "${#matched[@]}" -eq 0 ]]; then
+    echo "[e2e] ERROR: No ${tier_name} specs found in $E2E_RUN_DIR/specs" >&2
     exit 1
   fi
-  PW_ARGS+=("${TIER1_SPECS[@]}")
+  PW_ARGS+=("${matched[@]}")
+}
+if [[ "$RUN_TIER1" -eq 1 ]]; then
+  add_tier_specs "tier1" "specs/tier1-*.spec.mjs"
+fi
+if [[ "$RUN_TIER2" -eq 1 ]]; then
+  add_tier_specs "tier2" "specs/tier2-*.spec.mjs"
+fi
+if [[ "$RUN_TIER3" -eq 1 ]]; then
+  add_tier_specs "tier3" "specs/tier3-*.spec.mjs"
+fi
+if [[ "$RUN_TIER4" -eq 1 ]]; then
+  add_tier_specs "tier4" "specs/tier4-*.spec.mjs"
 fi
 echo "[e2e] Node (Playwright): $(node -v) | Node (Server): $($NODE26_BIN -v) | Repo: $LH_REPO_DIR"
 exec /opt/e2e/node_modules/.bin/playwright test "${PW_ARGS[@]}"

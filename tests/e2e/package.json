@@ -7,7 +7,10 @@
     "test": "playwright test",
     "test:list": "playwright test --list",
     "test:selfcheck": "playwright test specs/harness-selfcheck.spec.mjs",
-    "test:tier1": "playwright test specs/tier1-*.spec.mjs"
+    "test:tier1": "playwright test specs/tier1-*.spec.mjs",
+    "test:tier2": "playwright test specs/tier2-*.spec.mjs",
+    "test:tier3": "playwright test specs/tier3-*.spec.mjs",
+    "test:tier4": "playwright test specs/tier4-*.spec.mjs"
   },
   "dependencies": {
     "@playwright/test": "1.46.1"

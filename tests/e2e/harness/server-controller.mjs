@@ -182,48 +182,103 @@ export class ServerController {
 
 		const hasExplicitMockBaseUrl = options.mockBaseUrl !== undefined && options.mockBaseUrl !== null;
 		const existingAuthMode = settings.customProvider.authMode;
-		const shouldBindFromSettings = Boolean(settings.customProvider.baseUrl) && existingAuthMode !== "disabled";
+		if (
+			options.authMode !== undefined &&
+			options.authMode !== "keyless" &&
+			options.authMode !== "apiKey" &&
+			options.authMode !== "disabled"
+		) {
+			throw new Error(`Invalid options.authMode: ${options.authMode}`);
+		}
+		if (options.apiKey !== undefined && (typeof options.apiKey !== "string" || !options.apiKey.trim())) {
+			throw new Error("Invalid options.apiKey: expected non-empty string");
+		}
+		if (options.authMode && options.authMode !== "apiKey" && options.apiKey !== undefined) {
+			throw new Error(`Invalid options combination: options.apiKey cannot be set when authMode is "${options.authMode}"`);
+		}
+		const effectiveConfiguredMode = options.authMode ?? existingAuthMode;
+		const shouldBindFromSettings =
+			Boolean(settings.customProvider.baseUrl) &&
+			(effectiveConfiguredMode !== "disabled" || options.apiKey !== undefined);
 
 		if (!hasExplicitMockBaseUrl && !shouldBindFromSettings) {
 			if (options.apiKey !== undefined) {
-				if (typeof options.apiKey !== "string" || !options.apiKey.trim()) {
-					throw new Error("Invalid options.apiKey: expected non-empty string");
-				}
 				fs.mkdirSync(this.authDir, { recursive: true, mode: 0o700 });
 				const existingAuth = this._readExistingAuthObject();
 				const nextAuth = {
 					...existingAuth,
 					CUSTOM_OPENAI_API_KEY: options.apiKey,
 				};
+				delete nextAuth.__learnharness_custom_provider_binding;
 				fs.writeFileSync(this.authFile, `${JSON.stringify(nextAuth, null, "\t")}\n`, {
 					encoding: "utf8",
 					mode: 0o600,
 				});
 				fs.chmodSync(this.authFile, 0o600);
+				settings.customProvider.authMode = options.authMode ?? "apiKey";
+				delete settings.customProvider.credentialBindingId;
+				fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, "\t")}\n`, "utf8");
+			} else {
+				if (options.authMode !== undefined || effectiveConfiguredMode === "disabled") {
+					settings.customProvider.authMode = options.authMode ?? existingAuthMode;
+					delete settings.customProvider.credentialBindingId;
+					fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, "\t")}\n`, "utf8");
+				}
+				if (
+					((options.authMode && options.authMode !== "apiKey") || effectiveConfiguredMode === "disabled") &&
+					fs.existsSync(this.authFile)
+				) {
+					const existingAuth = this._readExistingAuthObject();
+					if (
+						"CUSTOM_OPENAI_API_KEY" in existingAuth ||
+						"__learnharness_custom_provider_binding" in existingAuth
+					) {
+						const nextAuth = { ...existingAuth };
+						delete nextAuth.CUSTOM_OPENAI_API_KEY;
+						delete nextAuth.__learnharness_custom_provider_binding;
+						fs.writeFileSync(this.authFile, `${JSON.stringify(nextAuth, null, "\t")}\n`, {
+							encoding: "utf8",
+							mode: 0o600,
+						});
+						fs.chmodSync(this.authFile, 0o600);
+					}
+				}
 			}
 			return;
 		}
 
 		const rawBaseUrl = hasExplicitMockBaseUrl ? options.mockBaseUrl : settings.customProvider.baseUrl;
 		const normalizedBaseUrl = normalizeCustomBaseUrl(rawBaseUrl);
-		const authMode = existingAuthMode || "keyless";
+		let authMode;
+		if (options.authMode) {
+			authMode = options.authMode;
+		} else if (options.apiKey !== undefined) {
+			authMode = "apiKey";
+		} else if (hasExplicitMockBaseUrl && existingAuthMode === "disabled") {
+			authMode = "keyless";
+		} else {
+			authMode = existingAuthMode && existingAuthMode !== "disabled" ? existingAuthMode : "keyless";
+		}
 		const bindingId = randomBytes(16).toString("hex");
-
-		settings.customProvider.baseUrl = normalizedBaseUrl;
-		settings.customProvider.authMode = authMode;
-		settings.customProvider.credentialBindingId = bindingId;
 
 		fs.mkdirSync(this.authDir, { recursive: true, mode: 0o700 });
 		const existingAuth = this._readExistingAuthObject();
 		const nextAuth = { ...existingAuth };
 		if (options.apiKey !== undefined) {
-			if (typeof options.apiKey !== "string" || !options.apiKey.trim()) {
-				throw new Error("Invalid options.apiKey: expected non-empty string");
-			}
 			nextAuth.CUSTOM_OPENAI_API_KEY = options.apiKey;
+		} else if (authMode !== "apiKey") {
+			delete nextAuth.CUSTOM_OPENAI_API_KEY;
 		}
 		const hasFileApiKey =
 			typeof nextAuth.CUSTOM_OPENAI_API_KEY === "string" && nextAuth.CUSTOM_OPENAI_API_KEY.trim().length > 0;
+		if (authMode === "apiKey" && !hasFileApiKey) {
+			throw new Error("seedSyntheticProfile with authMode=\"apiKey\" requires options.apiKey or an existing CUSTOM_OPENAI_API_KEY in auth.json");
+		}
+
+		settings.customProvider.baseUrl = normalizedBaseUrl;
+		settings.customProvider.authMode = authMode;
+		settings.customProvider.credentialBindingId = bindingId;
+
 		const binding = {
 			version: 1,
 			id: bindingId,

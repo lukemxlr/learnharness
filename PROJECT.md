@@ -1,7 +1,7 @@
 # Project: LearnHarness Production Multi-Device & LXC Extension
 
 **Branch**: `feat/lxc-server-ipad-draw-migration` (in `c:\Users\User\Desktop\LearnHarness\repo`, branched from `cb25c8e49b85eed9e78315584731cad73a0118a6`)
-**Checkpoint Date**: 2026-11-19T20:52:00Z (Milestone 4 Checkpoint Commit)
+**Checkpoint Date**: 2026-11-19T21:02:47Z (Urgent Laptop Shutdown Checkpoint)
 **Architecture Review Status**: Audited by `reviewer_architecture_plan` (`18939c38`); all 8 Critical/Major/Minor findings integrated prior to M1 execution.
 
 ## Hard Safety & Isolation Constraints
@@ -11,9 +11,9 @@
 
 ---
 
-## Verified Progress vs. Open Items (Checkpoint 2026-11-19T20:52:00Z)
+## Verified Progress vs. Open Items (Checkpoint 2026-11-19T21:02:47Z)
 
-### 1. Completed & Passed
+### 1. Completed, Gate PASS & Locally Committed
 - **M0 (Checkout, Branch & Docker Readiness)**:
   - Cloned `https://github.com/amosblomqvist/learnharness` (`cb25c8e49b85eed9e78315584731cad73a0118a6`) into `c:\Users\User\Desktop\LearnHarness\repo` on dedicated branch `feat/lxc-server-ipad-draw-migration` (`.agents/skills` preserved).
   - Verified Linux Docker images (`node:26-bookworm-slim` v26.13.1, `mcr.microsoft.com/playwright:noble` with `webkit-2051`).
@@ -22,7 +22,7 @@
 - **M1 (`F1`–`F5`: Docker Runner, Attachment Store, Test Provider, LXC/Proxy, Single-Account Auth, Headless ChatGPT OAuth & Model Catalog) — DONE & VERIFIED (`29fbecc`)**:
   - Iteration 2 Docker Verification Gates (`learnharness-test:node26`): `typecheck` Exit `0`, `lint` Exit `0` (`0` errors), full `test` (`5355` tests / `708` suites: `5351` passed, `0` failed, `4` pre-existing OS/fs skips), `build` Exit `0`, `smoke` Exit `0` + standalone leak check (`0` leaked auth/credential/env/data files).
   - Gate Verdicts: `reviewer_1` APPROVE, `reviewer_2` APPROVE, `challenger_1` APPROVE, `challenger_2` APPROVE, `teamwork_auditor` CLEAN (**PASS 5/5**).
-- **M2 (Safe Profile Migration Tooling — R2) — DONE & VERIFIED (`e2be1f6`)**:
+- **M2 (Safe Profile Migration Tooling — R2) — DONE & VERIFIED (`e2be1f6b`)**:
   - Targeted tests (`177/177` across `37` suites / `11` files), `typecheck` Exit `0`, `lint` Exit `0`, live Node 26 CLI smoke (`export` -> `dry-run` `0` bytes -> `apply` `11003` bytes -> repeat `apply` `0` bytes), Gate Verdicts **PASS 5/5**.
   - Key deliverables: `src/core/contracts/migration.ts`, `src/server/migration.ts`, `scripts/migrate-profile.mjs`, `src/store/chats.ts`, `src/store/settings.ts`, `tests/migration.test.ts`, `tests/fixtures/synthetic-profile/legacy-windows/**`.
 - **M3 (Live Stream Handoff & Electron Remote Client — R3) — DONE & VERIFIED (`2045a76`)**:
@@ -31,14 +31,14 @@
     - `reviewer_m3_r4_2`: APPROVE (`219/219` 8-file suite)
     - `challenger_m3_r4_1`: APPROVE (`188/188` + Probes 1–4)
     - `challenger_m3_r4_2`: APPROVE (`83/83` + Electron probes)
-    - `auditor_m3_r4`: CLEAN (2x cold `10/10` `tests/live-stream-handoff.test.ts` & `228/228` target suite)
+    - `auditor_m3_r4`: CLEAN (`10/10` 2x cold handoff, `9/9` electron-remote, `228/228` target suite)
   - **Packaging Verification**: `electron-builder.yml` (`files: ["!**/*", "electron/**/*", "package.json"]`) covers all 5 new Electron remote/setup files (`package.json` unchanged).
   - **Key M3 Deliverables (24 files)**:
     - Server keepalive & stream handoff: `src/server/stream-keepalive.ts`, `src/server/pi/ui-stream.ts`, `src/server/side-chat.ts`, `src/server/chat-handler.ts`, `app/api/jobs/route.ts`, `app/api/chats/[id]/route.ts`, `app/api/chats/[id]/stream/route.ts`, `app/api/chats/[id]/side-chats/route.ts`, `app/api/chats/[id]/side-chats/[threadId]/route.ts`
     - Client session resync: `components/chat.tsx`, `components/session-core.ts`, `components/session.ts`
     - Isolated Electron remote client: `electron/remote-config.cjs`, `electron/preload-remote.cjs`, `electron/preload-setup.cjs`, `electron/setup.html`, `electron/remote-reconnect.html`, `electron/chatgpt-ipc.cjs`, `electron/main.cjs`
     - Tests: `tests/live-stream-handoff.test.ts`, `tests/live-stream-handoff-ui.test.tsx`, `tests/side-chat-ping.test.tsx`, `tests/electron-remote.test.ts`, `tests/session-core.test.ts`
-- **M4 (Attachments, Ctrl+V, PDF/Image Model Delivery & Overhauled Drawing Pad — R5) — DONE & VERIFIED (Iteration 2 Gate PASS 5/5)**:
+- **M4 (Attachments, Ctrl+V, PDF/Image Model Delivery & Overhauled Drawing Pad — R5) — DONE & VERIFIED (`40b6395`, Iteration 2 Gate PASS 5/5)**:
   - **Iteration 2 Gate Verdict — PASS 5/5**:
     - `reviewer_m4_r2_1`: APPROVE (`394/394` across `56` suites + `73/73` plugin tests + `typecheck`/`lint` `0`)
     - `reviewer_m4_r2_2`: APPROVE (`73/73` + `262/262`)
@@ -52,26 +52,29 @@
     - Overhauled `plugins/drawing-pad` (`Bild 1`: grid, colors, widths, undo/redo, independent `Light`/`Dark`/`App` paper theme, per-question local draft, "Add to answer" staging): `plugins/drawing-pad/README.md`, `plugins/drawing-pad/src/{capture,geometry,icons,main,sheet,state,strokes,theme}.ts`, `plugins/drawing-pad/src/styles.css`, `plugins/drawing-pad/tests/{browser-fixture.mjs,frontend.test.ts,geometry.test.ts,state.test.ts,strokes.test.ts,theme-races.test.ts,theme.test.ts}`
     - Tests: `tests/attachment-delivery.test.ts`, `tests/attachments-route.test.ts`, `tests/compaction-multimodal.test.ts`, `tests/composer-attach.test.tsx`, `tests/helpers/plugin-chrome.tsx`, `tests/path-input.test.tsx`, `tests/question-attachments-ui.test.tsx`
   - **E2E Note**: Core plugins default disabled per `tests/core-plugins.test.ts`; E2E Drawing Pad runs must explicitly enable `drawing-pad` (`plugins-state.json` or `PUT /api/plugins/drawing-pad`).
-- **E2E Testing Track (`M-E2E-1` & `M-E2E-2`) — Harness Gate PASS**:
-  - Isolated Playwright WebKit harness (`tests/e2e/**`) and synthetic fixtures (`tests/fixtures/e2e-synthetic/**`) with `167` Tiers 1–4 specs ready (kept unstaged until E2E execution checkpoint).
+- **`M-E2E-1` & `M-E2E-2` (E2E Testing Harness & Specs) — Gate 18 & Gate 19 PASS (Now Committed in Checkpoint)**:
+  - `167` Tiers 1–4 specs across `11` files under `tests/e2e/**`, `21/21` Dual-Node ESM, `--selfcheck 15/15`, Auditors CLEAN — now committed in this checkpoint commit.
 
-### 2. Still Running / Open (To Execute Next)
-- **Next Milestone — M5 (iPadOS Safari / WebKit UI & Responsive Matrix — R4) + parallel R7 English Docs**:
-  - `viewport-fit=cover`, `safe-area-inset-*`, overlay drawer, `visualViewport` handling, `PracticeDock` draft fix, touch controls >=44px, Playwright WebKit viewport matrix + manual checklist, and parallel R7 English docs (`docs/setup-and-operation.md`, `docs/developer-handover.md`, linked in `docs/README.md`).
-- **Combined `M-E2E-3` & M6 (Final Integration Gate)**:
-  - Execute the `167` E2E specs (WebKit viewport matrix & end-to-end acceptance scenarios), one-time full repo test run + standalone build inside container-internal `/tmp/lh-run`, and finalize R7 English docs.
-- **Deferred Hardware / VM / User-Account Tests**:
-  - **Windows-VM Electron GUI / NSIS checks**: Electron desktop app launch, NSIS installer, auto-updater, remote URL first-run/reconnect GUI, and real Windows `Ctrl+V` clipboard screenshot paste.
-  - **Real iPad Safari checks**: Safari virtual keyboard, Apple Pencil strokes/palm rejection, Photos/Files picker, Split View multitasking.
-  - **Live LXC deployment checks**: systemd service + Cloudflare Tunnel + real ChatGPT Plus OAuth login & real profile migration (user-triggered).
+### 2. Interrupted by Urgent Laptop Shutdown (Partially Completed & Committed Here)
+- **R7 English Documentation Draft (`docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`)**:
+  - Completed initial draft by `worker_r7_docs` (`396d5195`, link- & privacy-checked, retaining `[PENDING FINAL M5/M6 RUN — update after M5/M6 Gate]` markers) and committed in this checkpoint.
+- **M5 (iPadOS Safari / WebKit UI & Responsive Matrix — R4)**:
+  - 3 parallel Explorers completed (`dbb9bc62`, `0d848c12`, `5ad38e31` in brain scratch); implementation interrupted before code edits.
+
+### 3. Remaining Next Session (Concrete Resume Order)
+1. **Complete `M5` (iPadOS Safari / WebKit UI & responsive matrix)** per `2026-11-19T18:54:36Z` Gate threshold (`REQUEST_CHANGES`/`REJECT` only for functional/security/data-loss/WebKit-layout bugs) -> local commit.
+2. **Finalize `R7` docs** (`docs/developer-handover.md` M5/M6 sections + `docs/setup-and-operation.md` review).
+3. **Run Combined Final Acceptance Gate (`M-E2E-3` + `M6`)**: `167` E2E specs with `drawing-pad` enabled in E2E harness + single full 708-suite `npm test` & standalone `next build` + `smoke` inside container-internal `/tmp/lh-run` copy (no duplicate Reviewer full-suite re-runs) -> Victory Audit.
+4. **Open user/hardware/LXC end-tests** (`tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md`): isolated Windows VM Electron/installer/`Ctrl+V`, real iPadOS Safari/Apple Pencil, live Proxmox LXC + Cloudflare Tunnel + ChatGPT OAuth + real profile migration.
 
 ---
 
 ## Concrete Next Step
 Run on branch `feat/lxc-server-ipad-draw-migration` inside `c:\Users\User\Desktop\LearnHarness\repo` (**never** run `node`/`npm`/Electron on Windows host):
 
-1. **Proceed with M5 (iPadOS Safari / WebKit UI & Responsive Matrix — R4) + parallel R7 English Docs**, validating targeted tests, `typecheck`, `lint`, and WebKit viewport specs in Docker (`learnharness-test:node26` / `mcr.microsoft.com/playwright:noble`).
-2. **Proceed to Combined `M-E2E-3` & M6** (execute the `167` E2E specs, one-time full repo test suite + standalone build inside `/tmp/lh-run`, and finalize R7 English docs).
+1. **Complete M5 (iPadOS Safari / WebKit UI & Responsive Matrix — R4)** using the 3 completed Explorer outputs (`dbb9bc62`, `0d848c12`, `5ad38e31` in brain scratch) and `2026-11-19T18:54:36Z` Gate threshold -> local commit.
+2. **Finalize R7 English Docs** (`docs/developer-handover.md` M5/M6 sections + `docs/setup-and-operation.md` review, removing `[PENDING FINAL M5/M6 RUN — update after M5/M6 Gate]` markers after final runs).
+3. **Execute Combined Final Acceptance Gate (`M-E2E-3` + `M6`)**: run the `167` E2E specs with `drawing-pad` enabled in E2E harness + single full 708-suite `npm test` & standalone `next build` + `smoke` inside container-internal `/tmp/lh-run` copy -> Victory Audit.
 
 ---
 
@@ -97,10 +100,11 @@ Run on branch `feat/lxc-server-ipad-draw-migration` inside `c:\Users\User\Deskto
 
 | # | Name | Dependencies | Status |
 |---|------|-------------|--------|
-| E2E | E2E Testing Track (Parallel) | M1 interfaces | HARNESS_READY (`167` Tiers 1–4 specs unstaged under `tests/e2e/**`; full run at M6) |
+| E2E | E2E Testing Track (`M-E2E-1` & `M-E2E-2`) | M1 interfaces | GATE 18 & 19 PASS (`167` Tiers 1–4 specs across `11` files under `tests/e2e/**`, `21/21` Dual-Node ESM, `--selfcheck 15/15`, Auditors CLEAN; committed) |
 | M1 | Docker Baseline, Shared Contracts, Auth, LXC/Proxy & ChatGPT Catalog | none | DONE & VERIFIED (`29fbecc`, Gate PASS 5/5) |
-| M2 | Safe Profile Migration Tooling | M1 | DONE & VERIFIED (`e2be1f6`, Gate PASS 5/5) |
+| M2 | Safe Profile Migration Tooling | M1 | DONE & VERIFIED (`e2be1f6b`, Gate PASS 5/5) |
 | M3 | Live Stream Handoff & Electron Remote Client | M1 | DONE & VERIFIED (`2045a76`, Gate PASS 5/5) |
-| M4 | Attachments (`Ctrl+V`/PDF/Photos) & Overhauled Drawing Pad | M1, M3 | DONE & VERIFIED (Iteration 2 Gate PASS 5/5) |
-| M5 | iPadOS Safari / WebKit UI & Responsive Matrix (+ parallel R7 Docs) | M1, M3, M4 | NEXT / ACTIVE |
-| M6 | Combined `M-E2E-3` & Final Integration Gate (`/tmp/lh-run` Full Run + R7 Docs) | M1–M5, E2E | PLANNED |
+| M4 | Attachments (`Ctrl+V`/PDF/Photos) & Overhauled Drawing Pad | M1, M3 | DONE & VERIFIED (`40b6395`, Iter 2 Gate PASS 5/5) |
+| R7 | English Documentation Draft (`docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`) | M1–M4 | DRAFT COMMITTED (`worker_r7_docs` `396d5195`; `[PENDING FINAL M5/M6 RUN]` markers retained until M6) |
+| M5 | iPadOS Safari / WebKit UI & Responsive Matrix | M1, M3, M4 | INTERRUPTED (3 Explorers `dbb9bc62`/`0d848c12`/`5ad38e31` complete; code edits next) |
+| M6 | Combined `M-E2E-3` & Final Acceptance Gate (`/tmp/lh-run` Full Run + R7 Finalization) | M1–M5, E2E | PLANNED |
