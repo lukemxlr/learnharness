@@ -19,6 +19,15 @@ import { writeFileAtomicSync } from "../store/atomic-write.ts";
 
 const PDF_MAGIC = Buffer.from("%PDF-", "ascii");
 
+export class AttachmentValidationError extends Error {
+	readonly statusCode: 400 | 413 | 415;
+	constructor(message: string, statusCode: 400 | 413 | 415) {
+		super(message);
+		this.name = "AttachmentValidationError";
+		this.statusCode = statusCode;
+	}
+}
+
 export interface StoreAttachmentInput {
 	bytes: Uint8Array;
 	filename: string;
@@ -115,22 +124,22 @@ function toRef(meta: AttachmentMetaRecord): AttachmentRef {
 export function storeAttachment(input: StoreAttachmentInput): StoredAttachmentResult {
 	const { bytes, filename, mimeType: declaredRaw, dataDir = PATHS.data, createdAt } = input;
 	if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0) {
-		throw new Error("Attachment is empty");
+		throw new AttachmentValidationError("Attachment is empty", 400);
 	}
 	const sniffed = detectAttachmentMimeType(bytes);
 	if (!sniffed) {
-		throw new Error("Unsupported or unrecognized attachment format");
+		throw new AttachmentValidationError("Unsupported or unrecognized attachment format", 415);
 	}
-	if (declaredRaw !== undefined) {
+	if (declaredRaw !== undefined && declaredRaw.trim() !== "") {
 		const normalizedDeclared = normalizeAttachmentMimeType(declaredRaw);
 		if (!normalizedDeclared || normalizedDeclared !== sniffed) {
-			throw new Error(`Attachment bytes (${sniffed}) do not match declared MIME type (${declaredRaw})`);
+			throw new AttachmentValidationError(`Attachment bytes (${sniffed}) do not match declared MIME type (${declaredRaw})`, 415);
 		}
 	}
 	const kind = attachmentKindForMime(sniffed)!;
 	const maxBytes = attachmentMaxBytesForKind(kind);
 	if (bytes.byteLength > maxBytes) {
-		throw new Error(`Attachment exceeds ${Math.round(maxBytes / (1024 * 1024))} MiB limit`);
+		throw new AttachmentValidationError(`Attachment exceeds ${Math.round(maxBytes / (1024 * 1024))} MiB limit`, 413);
 	}
 
 	const id = createHash("sha256").update(bytes).digest("hex");
@@ -187,7 +196,13 @@ export function storeAttachment(input: StoreAttachmentInput): StoredAttachmentRe
 	};
 
 	writeBinaryAtomicSync(filePath, bytes);
-	writeFileAtomicSync(metaPath, `${JSON.stringify(meta, null, "\t")}\n`, { allowInPlaceFallback: true });
+	try {
+		writeFileAtomicSync(metaPath, `${JSON.stringify(meta, null, "\t")}\n`, { allowInPlaceFallback: true });
+	} catch (error) {
+		try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+		try { fs.rmdirSync(shaDir); } catch { /* ignore */ }
+		throw error;
+	}
 
 	return {
 		ref: toRef(meta),

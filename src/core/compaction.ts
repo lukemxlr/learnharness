@@ -34,6 +34,7 @@
  */
 
 import { citationsToReadableText } from "./citations.ts";
+import type { AttachmentRef } from "./contracts/attachments.ts";
 import type { PlanTree } from "./contracts/plan.ts";
 import { derivePlanStatusesLh, derivedNodeStatus } from "./contracts/plan.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
@@ -118,6 +119,12 @@ export function estimateMessageTokens(message: LhMessage | AgentMessage, model?:
 		}
 	} else {
 		chars += textCharsOfContent(content);
+		const attachments = (message as { attachments?: readonly AttachmentRef[] }).attachments;
+		if (Array.isArray(attachments)) {
+			for (const a of attachments) {
+				if (a?.kind === "image") chars += ESTIMATED_IMAGE_CHARS;
+			}
+		}
 		if (message.role === "system") {
 			const system = message as SystemMessage;
 			for (const section of Object.values(system.sections ?? {})) chars += section?.length ?? 0;
@@ -332,7 +339,27 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${citationsToReadableText((m as { content: string }).content)}`);
+			const content = (m as { content?: unknown }).content;
+			const attachments = (m as { attachments?: readonly AttachmentRef[] }).attachments;
+			let text = "";
+			if (typeof content === "string") {
+				text = citationsToReadableText(content);
+			} else if (Array.isArray(content)) {
+				const chunks: string[] = [];
+				for (const block of content as Array<{ type?: string; text?: string }>) {
+					if (block?.type === "text" && typeof block.text === "string" && block.text) {
+						chunks.push(citationsToReadableText(block.text));
+					} else if (block?.type === "image") {
+						chunks.push("[image]");
+					}
+				}
+				text = chunks.join("\n");
+			}
+			if (Array.isArray(attachments) && attachments.length > 0) {
+				const labels = attachments.map((a) => `[${a.kind === "pdf" ? "PDF" : "Image"}: ${a.filename}]`).join(" ");
+				text = text ? `${text}\n${labels}` : labels;
+			}
+			lines.push(`[LEARNER] ${text}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];

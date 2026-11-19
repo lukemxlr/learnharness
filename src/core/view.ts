@@ -33,6 +33,7 @@
  */
 
 import type { AssistantMessage, ImageContent, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AttachmentRef } from "./contracts/attachments.ts";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
 import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText, pluginQuestionResultMatches } from "./native-messages.ts";
 import { readPluginQuestionMessageAnnotation, readPluginQuestionCancellation, type PluginQuestionAnnotationRead } from "./plugin-questions.ts";
@@ -203,11 +204,17 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 
 		if (role === "user") {
 			const content = m.content as string | Array<{ type: string; text?: string }>;
-			const parts = typeof content === "string" ? [textPart(content)] : content.flatMap((block): LhViewPart[] => {
-				if (block.type === "text") return [textPart(block.text as string)];
-				if (block.type === "image") return [{ ...block as ImageContent }];
-				return [];
-			});
+			const attachments = (m as LhMessage).attachments as AttachmentRef[] | undefined;
+			const parts: LhViewPart[] = typeof content === "string"
+				? (content || !attachments?.length ? [textPart(content)] : [])
+				: content.flatMap((block): LhViewPart[] => {
+					if (block.type === "text") return [textPart(block.text as string)];
+					if (block.type === "image") return [{ ...block as ImageContent }];
+					return [];
+				});
+			if (attachments?.length) {
+				parts.push({ type: "data-attachments", data: attachments });
+			}
 			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}

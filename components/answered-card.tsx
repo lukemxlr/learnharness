@@ -163,7 +163,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			)}
 
 			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
-			<SubmittedImages images={answer.images?.answer} />
+			<SubmittedImages images={answer.images?.answer} attachments={answer.attachments} />
 
 			{/* The confidence record (owner round 6): the slider's rail, disc
 			    removed — the missing handle itself says "this is a record, not a

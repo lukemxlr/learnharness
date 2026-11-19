@@ -68,6 +68,7 @@ import {
 } from "../core/contracts.ts";
 import type { TurnInput, UserSteerInput } from "../core/input-events.ts";
 import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, newUserSteer, type LhMessage } from "../core/native-messages.ts";
+import { prepareSteerAttachments } from "./attachment-delivery.ts";
 import { prepareSubmissionImages, submissionImagePolicyKey } from "./submission-images.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
@@ -314,6 +315,10 @@ export interface UserSteerEntry {
 	handedTo?: Agent;
 }
 
+export function pendingUserSteerMessages(chatId: string): LhMessage[] {
+	return (state().userSteers.get(chatId) ?? []).map((entry) => entry.message);
+}
+
 /** Async composer admission keeps the live agent private. Future chat settings
  * are deliberately irrelevant: this steer belongs to the captured live run.
  * Settling keeps the existing send fallback; replacements must never retarget. */
@@ -326,13 +331,14 @@ export async function prepareAndSteerChat(chatId: string, input: UserSteerInput)
 	const policy = submissionImagePolicyKey({ model });
 	const { text, id } = input;
 	const images = await prepareSubmissionImages(input.images, { model });
+	const attachments = await prepareSteerAttachments(chatId, input.attachments, { model });
 	const currentSession = stores.chatStore.getChat(chatId);
 	if (!currentSession || currentSession.createdAt !== session.createdAt || currentSession.kind !== session.kind) return "stale";
 	const current = state().liveAgents.get(chatId);
 	if (!current) return "settled";
 	if (current !== agent || current.state.model !== model || submissionImagePolicyKey({ model }) !== policy) return "stale";
 	// No await may separate the identity/policy check from this registry handoff.
-	return steerLiveChat(chatId, newUserSteer(text, id, images)) ? "accepted" : "settled";
+	return steerLiveChat(chatId, newUserSteer(text, id, images, attachments)) ? "accepted" : "settled";
 }
 
 /** Synchronous live handoff. The registry copy preserves the existing

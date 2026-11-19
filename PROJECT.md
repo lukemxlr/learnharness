@@ -1,7 +1,7 @@
 # Project: LearnHarness Production Multi-Device & LXC Extension
 
 **Branch**: `feat/lxc-server-ipad-draw-migration` (in `c:\Users\User\Desktop\LearnHarness\repo`, branched from `cb25c8e49b85eed9e78315584731cad73a0118a6`)
-**Checkpoint Date**: 2026-11-19T18:22:00Z (Milestone 3 Checkpoint Commit)
+**Checkpoint Date**: 2026-11-19T20:52:00Z (Milestone 4 Checkpoint Commit)
 **Architecture Review Status**: Audited by `reviewer_architecture_plan` (`18939c38`); all 8 Critical/Major/Minor findings integrated prior to M1 execution.
 
 ## Hard Safety & Isolation Constraints
@@ -11,7 +11,7 @@
 
 ---
 
-## Verified Progress vs. Open Items (Checkpoint 2026-11-19T18:22:00Z)
+## Verified Progress vs. Open Items (Checkpoint 2026-11-19T20:52:00Z)
 
 ### 1. Completed & Passed
 - **M0 (Checkout, Branch & Docker Readiness)**:
@@ -25,7 +25,7 @@
 - **M2 (Safe Profile Migration Tooling — R2) — DONE & VERIFIED (`e2be1f6`)**:
   - Targeted tests (`177/177` across `37` suites / `11` files), `typecheck` Exit `0`, `lint` Exit `0`, live Node 26 CLI smoke (`export` -> `dry-run` `0` bytes -> `apply` `11003` bytes -> repeat `apply` `0` bytes), Gate Verdicts **PASS 5/5**.
   - Key deliverables: `src/core/contracts/migration.ts`, `src/server/migration.ts`, `scripts/migrate-profile.mjs`, `src/store/chats.ts`, `src/store/settings.ts`, `tests/migration.test.ts`, `tests/fixtures/synthetic-profile/legacy-windows/**`.
-- **M3 (Live Stream Handoff & Electron Remote Client — R3) — DONE & VERIFIED**:
+- **M3 (Live Stream Handoff & Electron Remote Client — R3) — DONE & VERIFIED (`2045a76`)**:
   - **Iteration 4 Gate Verdict — PASS 5/5**:
     - `reviewer_m3_r4_1`: APPROVE (`507/507` 28-file suite)
     - `reviewer_m3_r4_2`: APPROVE (`219/219` 8-file suite)
@@ -38,15 +38,28 @@
     - Client session resync: `components/chat.tsx`, `components/session-core.ts`, `components/session.ts`
     - Isolated Electron remote client: `electron/remote-config.cjs`, `electron/preload-remote.cjs`, `electron/preload-setup.cjs`, `electron/setup.html`, `electron/remote-reconnect.html`, `electron/chatgpt-ipc.cjs`, `electron/main.cjs`
     - Tests: `tests/live-stream-handoff.test.ts`, `tests/live-stream-handoff-ui.test.tsx`, `tests/side-chat-ping.test.tsx`, `tests/electron-remote.test.ts`, `tests/session-core.test.ts`
+- **M4 (Attachments, Ctrl+V, PDF/Image Model Delivery & Overhauled Drawing Pad — R5) — DONE & VERIFIED (Iteration 2 Gate PASS 5/5)**:
+  - **Iteration 2 Gate Verdict — PASS 5/5**:
+    - `reviewer_m4_r2_1`: APPROVE (`394/394` across `56` suites + `73/73` plugin tests + `typecheck`/`lint` `0`)
+    - `reviewer_m4_r2_2`: APPROVE (`73/73` + `262/262`)
+    - `challenger_m4_r2_1`: APPROVE (`95/95` + unmocked `pdfjs` 1p/80p/scanned/corrupt/SHA-256/MC+FR/compaction E2E probes)
+    - `challenger_m4_r2_2`: APPROVE (Playwright WebKit hit-test + `179/179` + `73/73`)
+    - `auditor_m4_r2`: CLEAN
+  - **Key M4 Deliverables (62 files)**:
+    - Attachment APIs, delivery & compaction: `app/api/attachments/route.ts`, `app/api/attachments/[id]/route.ts`, `src/core/contracts/attachments.ts`, `src/server/attachments.ts`, `src/server/attachment-delivery.ts`, `src/server/chat-handler.ts`, `src/server/index.ts`, `src/server/jobs.ts`, `src/core/compaction.ts`, `src/agent/subagents/pdf-ops.ts`, `src/agent/teacher-agent.ts`
+    - Core events, question/plugin contracts & docs: `src/core/input-events.ts`, `src/core/native-messages.ts`, `src/core/plugin-submissions.ts`, `src/core/plugins.ts`, `src/core/question-core.ts`, `src/core/view.ts`, `docs/plugin-api/README.md`, `docs/plugin-api/contracts-attachments.md`, `docs/plugin-api/native-messages.md`, `docs/plugin-api/plugins.md`
+    - Chat, question, `Ctrl+V` paste & attachment staging UI: `components/attachment-staging.tsx`, `components/attach-files-button.tsx`, `components/answered-card.tsx`, `components/chat.tsx`, `components/composer.tsx`, `components/path-input.tsx`, `components/plugin-chrome.tsx`, `components/plugin-manager.ts`, `components/plugin-surface-targets.ts`, `components/plugins.tsx`, `components/practice-cards.tsx`, `components/practice-dock.tsx`, `components/question-dock.tsx`, `components/session-core.ts`, `components/session.ts`, `components/submitted-images.tsx`, `components/thinking-block.tsx`
+    - Overhauled `plugins/drawing-pad` (`Bild 1`: grid, colors, widths, undo/redo, independent `Light`/`Dark`/`App` paper theme, per-question local draft, "Add to answer" staging): `plugins/drawing-pad/README.md`, `plugins/drawing-pad/src/{capture,geometry,icons,main,sheet,state,strokes,theme}.ts`, `plugins/drawing-pad/src/styles.css`, `plugins/drawing-pad/tests/{browser-fixture.mjs,frontend.test.ts,geometry.test.ts,state.test.ts,strokes.test.ts,theme-races.test.ts,theme.test.ts}`
+    - Tests: `tests/attachment-delivery.test.ts`, `tests/attachments-route.test.ts`, `tests/compaction-multimodal.test.ts`, `tests/composer-attach.test.tsx`, `tests/helpers/plugin-chrome.tsx`, `tests/path-input.test.tsx`, `tests/question-attachments-ui.test.tsx`
+  - **E2E Note**: Core plugins default disabled per `tests/core-plugins.test.ts`; E2E Drawing Pad runs must explicitly enable `drawing-pad` (`plugins-state.json` or `PUT /api/plugins/drawing-pad`).
 - **E2E Testing Track (`M-E2E-1` & `M-E2E-2`) — Harness Gate PASS**:
   - Isolated Playwright WebKit harness (`tests/e2e/**`) and synthetic fixtures (`tests/fixtures/e2e-synthetic/**`) with `167` Tiers 1–4 specs ready (kept unstaged until E2E execution checkpoint).
 
 ### 2. Still Running / Open (To Execute Next)
-- **Next Milestone — M4 (Attachments & Overhauled Drawing Pad — R5)**:
-  - `Ctrl+V` Windows screenshot paste, PDF model delivery, MC & Free-Response attachment previews, overhauled `plugins/drawing-pad` (`Bild 3` -> `Bild 1`, `Karoraster`, colors, widths, undo/redo, independent `Light`/`Dark`/`App` paper theme, per-question local draft, "Add to answer").
-- **Remaining Milestones**:
-  - **M5**: iPadOS Safari / WebKit UI & Responsive Viewport Matrix (R4) — `viewport-fit=cover`, `safe-area-inset-*`, overlay drawer, `visualViewport` handling, `PracticeDock` draft fix, touch controls, Playwright WebKit matrix + manual checklist.
-  - **E2E Execution & M6**: Execute Tiers 1–4 against landed M2–M5 code + Tier 5 adversarial coverage hardening, full repo test run, standalone build, and R7 English docs (`docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`).
+- **Next Milestone — M5 (iPadOS Safari / WebKit UI & Responsive Matrix — R4) + parallel R7 English Docs**:
+  - `viewport-fit=cover`, `safe-area-inset-*`, overlay drawer, `visualViewport` handling, `PracticeDock` draft fix, touch controls >=44px, Playwright WebKit viewport matrix + manual checklist, and parallel R7 English docs (`docs/setup-and-operation.md`, `docs/developer-handover.md`, linked in `docs/README.md`).
+- **Combined `M-E2E-3` & M6 (Final Integration Gate)**:
+  - Execute the `167` E2E specs (WebKit viewport matrix & end-to-end acceptance scenarios), one-time full repo test run + standalone build inside container-internal `/tmp/lh-run`, and finalize R7 English docs.
 - **Deferred Hardware / VM / User-Account Tests**:
   - **Windows-VM Electron GUI / NSIS checks**: Electron desktop app launch, NSIS installer, auto-updater, remote URL first-run/reconnect GUI, and real Windows `Ctrl+V` clipboard screenshot paste.
   - **Real iPad Safari checks**: Safari virtual keyboard, Apple Pencil strokes/palm rejection, Photos/Files picker, Split View multitasking.
@@ -57,8 +70,8 @@
 ## Concrete Next Step
 Run on branch `feat/lxc-server-ipad-draw-migration` inside `c:\Users\User\Desktop\LearnHarness\repo` (**never** run `node`/`npm`/Electron on Windows host):
 
-1. **Proceed with M4 (Attachments & Overhauled Drawing Pad — R5)**, validating targeted tests, `typecheck`, and `lint` in `learnharness-test:node26` via `.\scripts\docker-test.ps1`.
-2. **Proceed to M5 (iPadOS Safari / WebKit UI & Viewport Matrix — R4)** and then **M6** (full repo test suite, standalone build, full E2E Tiers 1–4 + Tier 5 adversarial gate in Docker WebKit, and R7 English docs).
+1. **Proceed with M5 (iPadOS Safari / WebKit UI & Responsive Matrix — R4) + parallel R7 English Docs**, validating targeted tests, `typecheck`, `lint`, and WebKit viewport specs in Docker (`learnharness-test:node26` / `mcr.microsoft.com/playwright:noble`).
+2. **Proceed to Combined `M-E2E-3` & M6** (execute the `167` E2E specs, one-time full repo test suite + standalone build inside `/tmp/lh-run`, and finalize R7 English docs).
 
 ---
 
@@ -87,7 +100,7 @@ Run on branch `feat/lxc-server-ipad-draw-migration` inside `c:\Users\User\Deskto
 | E2E | E2E Testing Track (Parallel) | M1 interfaces | HARNESS_READY (`167` Tiers 1–4 specs unstaged under `tests/e2e/**`; full run at M6) |
 | M1 | Docker Baseline, Shared Contracts, Auth, LXC/Proxy & ChatGPT Catalog | none | DONE & VERIFIED (`29fbecc`, Gate PASS 5/5) |
 | M2 | Safe Profile Migration Tooling | M1 | DONE & VERIFIED (`e2be1f6`, Gate PASS 5/5) |
-| M3 | Live Stream Handoff & Electron Remote Client | M1 | DONE & VERIFIED (Gate PASS 5/5) |
-| M4 | Attachments (`Ctrl+V`/PDF/Photos) & Overhauled Drawing Pad | M1, M3 | NEXT / PLANNED |
-| M5 | iPadOS Safari / WebKit UI & Viewport Matrix | M1, M3, M4 | PLANNED |
-| M6 | Final Integration Gate (Tiers 1–4 + Tier 5) & R7 Docs | M1–M5, E2E | PLANNED |
+| M3 | Live Stream Handoff & Electron Remote Client | M1 | DONE & VERIFIED (`2045a76`, Gate PASS 5/5) |
+| M4 | Attachments (`Ctrl+V`/PDF/Photos) & Overhauled Drawing Pad | M1, M3 | DONE & VERIFIED (Iteration 2 Gate PASS 5/5) |
+| M5 | iPadOS Safari / WebKit UI & Responsive Matrix (+ parallel R7 Docs) | M1, M3, M4 | NEXT / ACTIVE |
+| M6 | Combined `M-E2E-3` & Final Integration Gate (`/tmp/lh-run` Full Run + R7 Docs) | M1–M5, E2E | PLANNED |

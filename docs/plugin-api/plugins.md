@@ -26,6 +26,7 @@
 - [PluginNotification](#pluginnotification)
 - [PluginPageActionContext](#pluginpageactioncontext)
 - [PluginSettingsRegistration](#pluginsettingsregistration)
+- [PluginStagedImageInput](#pluginstagedimageinput)
 - [PluginToolContext](#plugintoolcontext)
 - [PluginToolRenderer](#plugintoolrenderer)
 - [PluginToolRenderProps](#plugintoolrenderprops)
@@ -670,6 +671,7 @@ export interface PluginFrontendContext {
     refreshActions(): void;
     registerSubmissionInterceptor(definition: PluginSubmissionInterceptor): () => void;
     refreshSubmissions(): void;
+    stageSubmissionImage(target: import("./plugin-ui.ts").PluginSurfaceTarget, image: PluginStagedImageInput): Promise<void>;
     registerSettings(mount: PluginView["mount"]): () => void;
     registerSettings(schema: import("./plugin-ui.ts").PluginSettingsSchema): import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
     registerSettings(settings: PluginSettingsRegistration): (() => void) | import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
@@ -701,7 +703,7 @@ export interface PluginFrontendContext {
 }
 ```
 
-**Related types:** [PluginAction](plugins.md#pluginaction), [PluginActionPlacement](plugins.md#pluginactionplacement), [PluginCleanup](plugins.md#plugincleanup), [PluginCodeBlockRenderer](plugins.md#plugincodeblockrenderer), [PluginManifest](plugins.md#pluginmanifest), [PluginNotification](plugins.md#pluginnotification), [PluginProblemRenderer](plugin-problems.md#pluginproblemrenderer), [PluginQuestionRenderer](plugin-questions.md#pluginquestionrenderer), [PluginSettingsRegistration](plugins.md#pluginsettingsregistration), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginSubmissionInterceptor](plugin-submissions.md#pluginsubmissioninterceptor), [PluginToolRenderer](plugins.md#plugintoolrenderer), [PluginUi](plugin-ui.md#pluginui), [PluginView](plugins.md#pluginview), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [ServerEvent](events.md#serverevent).
+**Related types:** [PluginAction](plugins.md#pluginaction), [PluginActionPlacement](plugins.md#pluginactionplacement), [PluginCleanup](plugins.md#plugincleanup), [PluginCodeBlockRenderer](plugins.md#plugincodeblockrenderer), [PluginManifest](plugins.md#pluginmanifest), [PluginNotification](plugins.md#pluginnotification), [PluginProblemRenderer](plugin-problems.md#pluginproblemrenderer), [PluginQuestionRenderer](plugin-questions.md#pluginquestionrenderer), [PluginSettingsRegistration](plugins.md#pluginsettingsregistration), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginStagedImageInput](plugins.md#pluginstagedimageinput), [PluginSubmissionInterceptor](plugin-submissions.md#pluginsubmissioninterceptor), [PluginSurfaceTarget](plugin-ui.md#pluginsurfacetarget), [PluginToolRenderer](plugins.md#plugintoolrenderer), [PluginUi](plugin-ui.md#pluginui), [PluginView](plugins.md#pluginview), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [ServerEvent](events.md#serverevent).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -714,6 +716,7 @@ export interface PluginFrontendContext {
 - [refreshActions](#pluginfrontendcontext-refreshactions)
 - [registerSubmissionInterceptor](#pluginfrontendcontext-registersubmissioninterceptor)
 - [refreshSubmissions](#pluginfrontendcontext-refreshsubmissions)
+- [stageSubmissionImage](#pluginfrontendcontext-stagesubmissionimage)
 - [registerSettings](#pluginfrontendcontext-registersettings) — 3 signatures/variants
 - [ui](#pluginfrontendcontext-ui)
 - [registerCodeBlock](#pluginfrontendcontext-registercodeblock)
@@ -844,6 +847,21 @@ refreshSubmissions(): void;
 ```
 
 **Returns:** `void`.
+
+### PluginFrontendContext stageSubmissionImage
+
+Stage an image into the active submission target's attachment preview tray on the supplied surface without submitting a turn.
+
+```ts
+stageSubmissionImage(target: import("./plugin-ui.ts").PluginSurfaceTarget, image: PluginStagedImageInput): Promise<void>;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `target` | `import("./plugin-ui.ts").PluginSurfaceTarget` |
+| `image` | `PluginStagedImageInput` |
+
+**Returns:** `Promise<void>`.
 
 ### PluginFrontendContext registerSettings
 
@@ -1807,6 +1825,50 @@ export type PluginSettingsRegistration = PluginView["mount"] | import("./plugin-
 ```
 
 **Related types:** [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginView](plugins.md#pluginview).
+
+## PluginStagedImageInput
+
+Public SDK type, exported as `PluginStagedImageInput`. Import with `import type`; the SDK has no runtime exports.
+
+Image payload staged by a frontend plugin onto the active submission surface's preview tray.
+
+```ts
+export interface PluginStagedImageInput {
+    readonly mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+    readonly data: string;
+    readonly filename?: string;
+}
+```
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [mimeType](#pluginstagedimageinput-mimetype)
+- [data](#pluginstagedimageinput-data)
+- [filename](#pluginstagedimageinput-filename)
+
+### PluginStagedImageInput mimeType
+
+Image MIME type (PNG, JPEG, WebP, or GIF).
+
+```ts
+readonly mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+```
+
+### PluginStagedImageInput data
+
+Canonical base64-encoded image bytes without a data URL prefix.
+
+```ts
+readonly data: string;
+```
+
+### PluginStagedImageInput filename
+
+Optional display filename for the staged attachment preview.
+
+```ts
+readonly filename?: string;
+```
 
 ## PluginToolContext
 

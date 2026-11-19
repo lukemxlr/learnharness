@@ -168,14 +168,18 @@ export function preparePluginSubmission(input: unknown, target: PluginSubmission
 }
 
 /** Validate raw fields against the private rendered question; buildAnswer remains the only grader. */
-export function validatePluginBuiltinSubmissionAnswer(question: QuestionData, answer: PluginBuiltinSubmissionAnswer): AnswerRequest {
+export function validatePluginBuiltinSubmissionAnswer(
+	question: QuestionData,
+	answer: PluginBuiltinSubmissionAnswer,
+	options?: { hasAttachments?: boolean },
+): AnswerRequest {
 	const raw = builtinAnswer(object(clonePluginQuestionJson(answer)));
 	const values = raw.values ?? [], other = raw.other?.trim() ?? "", text = raw.text?.trim() ?? "";
 	if (new Set(values).size !== values.length || values.some(value => !question.options.some(option => option.value === value))) throw new Error("Answer contains duplicate or unknown option values");
 	if (raw.confidence !== undefined && question.kind !== "quiz") throw new Error("Confidence is only applicable to quiz answers");
 	if (question.mode === "text") {
 		if (values.length || other || raw.dontKnow === true) throw new Error("Selection fields are not applicable to text answers");
-		if (!text && !raw.images.length) throw new Error("Answer text or answer images are required");
+		if (!text && !raw.images.length && !options?.hasAttachments) throw new Error("Answer text or answer images are required");
 	} else {
 		if (text || (other && question.kind !== "ask")) throw new Error("Answer field is not applicable to this question");
 		if (raw.dontKnow && (values.length || other)) throw new Error("dontKnow cannot be combined with an answer selection");
@@ -191,6 +195,24 @@ export function validatePluginBuiltinSubmissionAnswer(question: QuestionData, an
 		...(raw.text !== undefined ? { text: raw.text } : {}),
 		...(raw.confidence !== undefined ? { confidence: raw.confidence } : {}),
 	};
+}
+
+export function validatePluginStagedImageInput(value: unknown): {
+	readonly mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+	readonly data: string;
+	readonly filename?: string;
+} {
+	const item = object(clonePluginQuestionJson(value));
+	keys(item, ["mimeType", "data", "filename"], ["mimeType", "data"]);
+	const prepared = preparePluginSubmissionImage({ type: "image", mimeType: item.mimeType, data: item.data });
+	if (item.filename !== undefined && (typeof item.filename !== "string" || !item.filename.trim())) {
+		throw new Error("Staged image filename must be a nonempty string");
+	}
+	return Object.freeze({
+		mimeType: prepared.mimeType as "image/png" | "image/jpeg" | "image/webp" | "image/gif",
+		data: prepared.data,
+		...(typeof item.filename === "string" ? { filename: item.filename.trim() } : {}),
+	});
 }
 
 /** Capture validated callbacks and priority without freezing a plugin-owned definition. */

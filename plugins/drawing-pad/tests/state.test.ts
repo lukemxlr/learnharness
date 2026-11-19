@@ -1,167 +1,162 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { Sheets } from "../src/state.ts";
+import type { PluginSessionViewInput, PluginSubmissionTarget } from "learnharness-plugin-api";
+import { draftStorageKey, questionKeyForInput, questionKeyForSubmissionTarget, Sheets } from "../src/state.ts";
 import type { Stroke } from "../src/strokes.ts";
-const stroke = (x = 10): Stroke => ({ tool: "pen", points: [{ x, y: 10, pressure: .5 }] });
-const blank = { background: "data:image/png;base64,fixture", backgroundColor: "#141414", width: 500, height: 400, pixelRatio: 2 };
-function fixture(kind: "teaching" | "practice" = "teaching") {
-  let changes = 0, resets = 0;
-  const sheets = new Sheets(() => changes++, () => resets++), state = sheets.session("a", kind);
-  sheets.create(state, blank);
-  return { sheets, state, changes: () => changes, resets: () => resets };
+
+const stroke = (x = 10, color = "auto", width = 4): Stroke => ({
+  tool: "pen",
+  color,
+  width,
+  points: [{ x, y: 10, pressure: 0.5 }],
+});
+
+function withMockStorage(run: (store: Map<string, string>) => void): void {
+  const store = new Map<string, string>();
+  const storage: Storage = {
+    get length() { return store.size; },
+    clear() { store.clear(); },
+    getItem(key: string) { return store.get(key) ?? null; },
+    key(index: number) { return [...store.keys()][index] ?? null; },
+    removeItem(key: string) { store.delete(key); },
+    setItem(key: string, value: string) { store.set(key, String(value)); },
+  };
+  const desc = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+  try {
+    run(store);
+  } finally {
+    if (desc) Object.defineProperty(globalThis, "localStorage", desc);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
 }
-it("teaching clears only after acceptance, never on capture", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke()]);
-  const captured = sheets.capture(state)!;
-  assert.equal(captured.sendImage, true); assert.equal(state.draft!.strokes.length, 1);
-  sheets.accepted(captured); assert.equal(state.draft!.strokes.length, 0); assert.equal(sheets.pending(state), false);
+
+it("derives identical question keys from view inputs and submission targets", () => {
+  const occ = { messageId: "m1", contentIndex: 0, toolCallId: "q1", toolName: "quiz" } as const;
+  const viewAnswer = { type: "answer", question: { occurrence: occ } } as unknown as PluginSessionViewInput;
+  const subAnswer = { type: "answer", question: { occurrence: occ } } as unknown as PluginSubmissionTarget;
+  assert.equal(questionKeyForInput(viewAnswer), questionKeyForSubmissionTarget(subAnswer));
+  assert.equal(questionKeyForInput({ type: "text" } as unknown as PluginSessionViewInput), "composer");
+  assert.equal(questionKeyForInput({ type: "unavailable", expanded: false, revealed: false } as unknown as PluginSessionViewInput), "composer");
 });
-it("failed/unacknowledged captures retain the drawing", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke()]);
-  sheets.capture(state); assert.equal(state.draft!.strokes.length, 1); assert.equal(sheets.pending(state), true);
+
+it("supports undo, redo, and post-undo branch truncation", () => {
+  const sheets = new Sheets(() => {}, () => {});
+  const state = sheets.session("s1", "teaching");
+  const draft = sheets.openDraft(state, "q1", 1);
+
+  sheets.commitStroke(state, state.drafts.get("q1")!, stroke(10));
+  sheets.commitStroke(state, state.drafts.get("q1")!, stroke(20));
+  sheets.commitStroke(state, state.drafts.get("q1")!, stroke(30));
+  assert.equal(state.drafts.get("q1")!.strokes.length, 3);
+  assert.equal(state.drafts.get("q1")!.redoStack.length, 0);
+
+  sheets.undo(state, state.drafts.get("q1")!);
+  sheets.undo(state, state.drafts.get("q1")!);
+  assert.equal(state.drafts.get("q1")!.strokes.length, 1);
+  assert.equal(state.drafts.get("q1")!.redoStack.length, 2);
+
+  sheets.redo(state, state.drafts.get("q1")!);
+  assert.equal(state.drafts.get("q1")!.strokes.length, 2);
+  assert.equal(state.drafts.get("q1")!.redoStack.length, 1);
+
+  // Branching stroke truncates redoStack
+  sheets.commitStroke(state, state.drafts.get("q1")!, stroke(99, "#2563eb", 8));
+  assert.equal(state.drafts.get("q1")!.strokes.length, 3);
+  assert.equal(state.drafts.get("q1")!.redoStack.length, 0);
+  assert.equal(draft.id > 0, true);
 });
-it("teaching late acceptance cannot erase newer strokes or recoloring", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke()]); const captured = sheets.capture(state)!;
-  sheets.update(state, [...state.draft!.strokes, stroke(50)]); sheets.accepted(captured);
-  assert.equal(state.draft!.strokes.length, 2);
-  const recolor = sheets.capture(state)!; sheets.setColor("#ff0000"); sheets.accepted(recolor);
-  assert.equal(state.draft!.strokes.length, 2);
-});
-it("practice keeps strokes and undo after acceptance and suppresses unchanged resends", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]);
-  const captured = sheets.capture(state)!; sheets.accepted(captured);
-  assert.equal(state.draft!.strokes.length, 1); assert.equal(sheets.pending(state), false);
-  assert.equal(sheets.capture(state)!.sendImage, false);
-});
-it("practice sends changed sheets and Undo back to the last sent image suppresses duplicates", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); sheets.accepted(sheets.capture(state)!);
-  sheets.update(state, [...state.draft!.strokes, stroke(50)]); assert.equal(sheets.pending(state), true);
-  sheets.undo(state); assert.equal(sheets.pending(state), false);
-});
-it("practice late acknowledgment marks only its captured image sent, retaining newer work", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); const captured = sheets.capture(state)!;
-  sheets.update(state, [...state.draft!.strokes, stroke(50)]); sheets.accepted(captured);
-  assert.equal(sheets.pending(state), true); assert.equal(state.draft!.strokes.length, 2);
-});
-it("fully erased history sends nothing but survives acceptance in practice", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); sheets.accepted(sheets.capture(state)!);
-  sheets.update(state, [...state.draft!.strokes, { tool: "eraser", points: [{ x: 10, y: 10, pressure: .5 }] }]);
-  assert.equal(sheets.pending(state), false); assert.equal(sheets.capture(state)!.sendImage, false);
-  sheets.accepted(sheets.capture(state)!); assert.equal(state.draft!.strokes.length, 2);
-  sheets.undo(state); assert.equal(sheets.pending(state), false, "the restored image was already sent");
-});
-it("off-screen ink remains eligible regardless of the current viewport", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke(-1000000)]);
-  assert.equal(sheets.pending(state), true); assert.equal(sheets.capture(state)!.sendImage, true);
-});
-it("panning never changes content, revision, resend detection, or acceptance ownership", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); const captured = sheets.capture(state)!;
-  const draft = state.draft; sheets.setTool(state, "hand"); sheets.setPan(state, { x: -10000, y: 5000 });
-  assert.equal(state.draft, draft); assert.equal(sheets.signature(state), captured.signature);
-  sheets.accepted(captured); assert.equal(sheets.pending(state), false);
-  sheets.setPan(state, { x: 3, y: -40 }); assert.equal(sheets.capture(state)!.sendImage, false);
-});
-it("export scale is frozen per attempt and does not edit ink or force unchanged practice resends", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); const captured = sheets.capture(state)!;
-  assert.equal(captured.imageScale, 50); const draft = state.draft;
-  sheets.setImageScale(25); assert.equal(captured.imageScale, 50); assert.equal(sheets.capture(state)!.imageScale, 25);
-  assert.equal(state.draft, draft); sheets.accepted(captured); assert.equal(sheets.pending(state), false);
-  sheets.update(state, [...state.draft!.strokes, stroke(80)]); assert.equal(sheets.capture(state)!.imageScale, 25);
-});
-it("teaching acceptance still clears after a camera-only change", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke()]); const captured = sheets.capture(state)!;
-  sheets.setPan(state, { x: 100, y: -500 }); sheets.accepted(captured);
-  assert.equal(state.draft!.strokes.length, 0); assert.deepEqual(state.pan, { x: 100, y: -500 });
-});
-it("camera position belongs to each session and resets only with a new sheet/problem", () => {
-  const { sheets, state } = fixture("practice"); sheets.observePoses(state, ["p1"], true); sheets.update(state, [stroke()]);
-  sheets.setPan(state, { x: -800, y: 1200 });
-  assert.deepEqual(sheets.session("b", "practice").pan, { x: 0, y: 0 });
-  assert.deepEqual(sheets.session("a", "practice").pan, { x: -800, y: 1200 });
-  sheets.setTool(state, "hand"); sheets.observePoses(state, ["p1", "p2"]);
-  assert.deepEqual(state.pan, { x: 0, y: 0 }); assert.equal(state.tool, "pen");
-});
-it("color changes recolor all held sheets and count as practice changes", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); sheets.accepted(sheets.capture(state)!);
-  const other = sheets.session("b", "teaching"); sheets.create(other, blank); sheets.update(other, [stroke(50)]);
-  const before = other.draft!.revision; sheets.setColor("#ff0000");
-  assert.equal(sheets.pending(state), true); assert.equal(other.draft!.revision, before + 1);
-  assert.equal(sheets.capture(other)!.color, "#ff0000");
-});
-it("navigation reuse returns the same per-session sheet, never another session's ink", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke()]);
-  assert.equal(sheets.session("a", "teaching"), state);
-  assert.equal(sheets.pending(sheets.session("b", "teaching")), false);
-});
-it("only a new accepted pose resets practice, not repeated/empty observations", () => {
-  const { sheets, state, resets } = fixture("practice"); sheets.observePoses(state, ["pose1"], true); sheets.update(state, [stroke()]);
-  sheets.observePoses(state, []); sheets.observePoses(state, ["pose1"]);
-  assert.equal(state.draft!.strokes.length, 1); assert.equal(resets(), 0);
-  sheets.observePoses(state, ["pose1", "pose2"]); assert.equal(state.draft, undefined); assert.equal(resets(), 1);
-  sheets.observePoses(state, ["pose1", "pose2"]); assert.equal(resets(), 1);
-});
-it("a historical backfill before the known latest pose does not reset the board", () => {
-  const { sheets, state, resets } = fixture("practice"); sheets.observePoses(state, ["pose2"], true); sheets.update(state, [stroke()]);
-  sheets.observePoses(state, ["pose1", "pose2"]); assert.equal(resets(), 0); assert.equal(state.draft!.strokes.length, 1);
-});
-it("new-problem reset fences old acceptance and preserves new sheet ownership", () => {
-  const { sheets, state } = fixture("practice"); sheets.observePoses(state, ["pose1"], true); sheets.update(state, [stroke()]);
-  const captured = sheets.capture(state)!; sheets.observePoses(state, ["pose1", "pose2"]);
-  sheets.create(state, blank); sheets.update(state, [stroke(80)]); sheets.accepted(captured);
-  assert.equal(state.sentSignature, ""); assert.equal(sheets.pending(state), true);
-});
-it("explicit Clear drops undo but retains the displayed reference until reopening", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke()]); const background = state.draft!.background;
-  sheets.clear(state); assert.equal(state.draft!.background, background); assert.equal(state.draft!.strokes.length, 0);
-  sheets.dropUntouched(state); assert.equal(state.draft, undefined);
-});
-it("closing a fully erased sheet preserves its undo history", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke(), { tool: "eraser", points: [{ x: 10, y: 10, pressure: .5 }] }]);
-  sheets.dropUntouched(state); assert.equal(state.draft!.strokes.length, 2); sheets.undo(state); assert.equal(sheets.pending(state), true);
-});
-it("palette replacement merges into the newest strokes and preserves reference geometry, camera and attempt snapshots", () => {
-  const { sheets, state } = fixture(); sheets.update(state, [stroke()]);
-  const before = sheets.capture(state)!, old = state.draft!;
-  sheets.setPan(state, { x: 42, y: -17 }); sheets.update(state, [...old.strokes, stroke(80)]);
-  sheets.setPalette("#000000", "light", new Map([[state, { id: old.id, background: "light-reference", backgroundColor: "#ffffff" }]]));
-  const next = sheets.capture(state)!;
-  assert.equal(next.draft.background, "light-reference"); assert.equal(next.color, "#000000");
-  assert.equal(next.draft.strokes.length, 2); assert.deepEqual(state.pan, { x: 42, y: -17 });
-  assert.deepEqual([next.draft.id, next.draft.width, next.draft.height, next.draft.pixelRatio], [old.id, old.width, old.height, old.pixelRatio]);
-  assert.equal(before.draft.background, old.background); assert.equal(before.color, "#ffffff");
-  sheets.accepted(before); assert.equal(state.draft!.strokes.length, 2);
-});
-it("background palette edits count as changed practice images even with identical configured ink", () => {
-  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); sheets.accepted(sheets.capture(state)!);
-  const draft = state.draft!;
-  sheets.setPalette(sheets.color, "different-palette", new Map([[state, { id: draft.id, background: "new-reference", backgroundColor: "#202020" }]]));
-  assert.equal(sheets.pending(state), true); const next = state.draft;
-  sheets.setPalette(sheets.color, "different-palette", new Map()); assert.equal(state.draft, next);
-});
-it("a late reference repaint cannot replace a new problem's sheet", () => {
-  const { sheets, state } = fixture("practice"), old = state.draft!;
-  sheets.create(state, { ...blank, background: "new-problem" });
-  sheets.setPalette(sheets.color, "light", new Map([[state, { id: old.id, background: "old-problem-repaint", backgroundColor: "#ffffff" }]]));
-  assert.equal(state.draft!.background, "new-problem");
-});
-it("accepted ink recolors only current-palette drafts, preserving older raster pairs and immutable attempts", () => {
-  let ink = "#ffffff", changes = 0;
-  const sheets = new Sheets(() => changes++, () => {}, () => ink);
-  const old = sheets.session("old", "teaching"); sheets.create(old, { ...blank, palette: "dark" }); sheets.update(old, [stroke()]);
-  const oldDraft = old.draft;
-  ink = "#000000";
-  const current = sheets.session("current", "practice"); sheets.create(current, { ...blank, palette: "light", backgroundColor: "#ffffff" });
-  sheets.update(current, [stroke()]); const captured = sheets.capture(current)!;
-  sheets.setInkForPalette("#7654ab", "light");
-  assert.equal(sheets.capture(current)!.color, "#7654ab"); assert.equal(current.draft!.revision, captured.draft.revision + 1);
-  assert.equal(old.draft, oldDraft); assert.equal(sheets.capture(old)!.color, "#ffffff");
-  assert.equal(captured.color, "#000000"); assert.equal(captured.draft.color, "#000000");
-  const acceptedDraft = current.draft, beforeNoop = changes;
-  sheets.setInkForPalette("#7654ab", "light"); assert.equal(current.draft, acceptedDraft); assert.equal(changes, beforeNoop);
-  sheets.accepted(captured); assert.equal(sheets.pending(current), true);
-});
-it("sheet change listeners unsubscribe and disposal loses window-owned drafts", () => {
-  const { sheets, state } = fixture(); let calls = 0; const off = sheets.onChange(() => calls++);
-  sheets.update(state, [stroke()]); off(); sheets.clear(state); assert.equal(calls, 1);
-  sheets.dispose(); assert.equal(sheets.sessions.size, 0);
-});
+
+it("persists drafts per (sessionId, questionKey) across reloads and isolates questions/sessions", () => withMockStorage((store) => {
+  const sheets1 = new Sheets(() => {}, () => {});
+  const s1 = sheets1.session("sess-1", "teaching");
+  sheets1.openDraft(s1, "q1", 2);
+  sheets1.commitStroke(s1, s1.drafts.get("q1")!, stroke(15, "#2563eb", 8));
+  sheets1.setPaperTheme(s1, s1.drafts.get("q1")!, "light");
+  sheets1.setGrid(s1, s1.drafts.get("q1")!, true);
+  sheets1.setPan(s1, s1.drafts.get("q1")!, { x: 24, y: -12 });
+
+  assert.ok(store.has(draftStorageKey("sess-1", "q1")));
+
+  // Simulate full page reload with new Sheets instance
+  const sheets2 = new Sheets(() => {}, () => {});
+  const s1Reloaded = sheets2.session("sess-1", "teaching");
+  const restored = sheets2.openDraft(s1Reloaded, "q1", 2);
+  assert.equal(restored.strokes.length, 1);
+  assert.equal(restored.strokes[0]!.color, "#2563eb");
+  assert.equal(restored.strokes[0]!.width, 8);
+  assert.equal(restored.paperTheme, "light");
+  assert.equal(restored.grid, true);
+  assert.deepEqual(restored.pan, { x: 24, y: -12 });
+
+  // Q2 in same session and Q1 in another session open clean
+  const q2 = sheets2.openDraft(s1Reloaded, "q2", 2);
+  assert.equal(q2.strokes.length, 0);
+  assert.equal(q2.paperTheme, "app");
+  assert.equal(q2.grid, false);
+
+  const s2 = sheets2.session("sess-2", "teaching");
+  const otherSession = sheets2.openDraft(s2, "q1", 2);
+  assert.equal(otherSession.strokes.length, 0);
+}));
+
+it("clear and accepted submission delete only the targeted draft from localStorage", () => withMockStorage((store) => {
+  const sheets = new Sheets(() => {}, () => {});
+  const s1 = sheets.session("sess-1", "teaching");
+  sheets.openDraft(s1, "q1", 1);
+  sheets.commitStroke(s1, s1.drafts.get("q1")!, stroke(10));
+  sheets.openDraft(s1, "q2", 1);
+  sheets.commitStroke(s1, s1.drafts.get("q2")!, stroke(20));
+
+  const s2 = sheets.session("sess-2", "teaching");
+  sheets.openDraft(s2, "q1", 1);
+  sheets.commitStroke(s2, s2.drafts.get("q1")!, stroke(30));
+
+  assert.equal(store.size, 3);
+
+  // Accepted submission clears only (sess-1, q1)
+  sheets.accepted("sess-1", "q1", "answer");
+  assert.equal(store.has(draftStorageKey("sess-1", "q1")), false);
+  assert.equal(store.has(draftStorageKey("sess-1", "q2")), true);
+  assert.equal(store.has(draftStorageKey("sess-2", "q1")), true);
+
+  // Clear deletes only (sess-1, q2)
+  sheets.clear(s1, s1.drafts.get("q2")!);
+  assert.equal(store.has(draftStorageKey("sess-1", "q2")), false);
+  assert.equal(store.has(draftStorageKey("sess-2", "q1")), true);
+}));
+
+it("handles corrupt storage entries gracefully and bounds persisted drafts via LRU", () => withMockStorage((store) => {
+  store.set(draftStorageKey("sess-1", "corrupt"), "{bad json");
+  const sheets = new Sheets(() => {}, () => {});
+  const state = sheets.session("sess-1", "teaching");
+  const recovered = sheets.openDraft(state, "corrupt", 1);
+  assert.equal(recovered.strokes.length, 0);
+
+  for (let i = 0; i < 30; i++) {
+    const k = `q-${i}`;
+    sheets.openDraft(state, k, 1);
+    sheets.commitStroke(state, state.drafts.get(k)!, stroke(i));
+  }
+  const keys = [...store.keys()].filter(k => k.startsWith("lh:drawing-pad:draft:v1:"));
+  assert.ok(keys.length <= 24);
+}));
+
+it("practice pose observation resets drafts only on a genuinely new accepted pose", () => withMockStorage((store) => {
+  let resets = 0;
+  const sheets = new Sheets(() => {}, () => resets++);
+  const state = sheets.session("p1", "practice");
+  sheets.observePoses(state, ["pose1"], true);
+  sheets.openDraft(state, "pose1", 1);
+  sheets.commitStroke(state, state.drafts.get("pose1")!, stroke(10));
+  assert.equal(store.has(draftStorageKey("p1", "pose1")), true);
+
+  sheets.observePoses(state, ["pose1"]);
+  assert.equal(resets, 0);
+  assert.equal(state.drafts.get("pose1")!.strokes.length, 1);
+
+  sheets.observePoses(state, ["pose1", "pose2"]);
+  assert.equal(resets, 1);
+  assert.equal(state.drafts.size, 0);
+  assert.equal(store.has(draftStorageKey("p1", "pose1")), false);
+}));

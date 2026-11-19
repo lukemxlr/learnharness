@@ -30,6 +30,7 @@
 
 import type { QuestionAnswerData } from "./question-core.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
+import { parseAttachmentRefArray, type AttachmentKind, type AttachmentRef } from "./contracts/attachments.ts";
 import { validatePluginSubmissionImageArray, validatePluginSubmissionImages, type PluginSubmissionImages, type PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import type { LhMessage } from "./native-messages.ts";
 import {
@@ -60,7 +61,7 @@ export type DismissPluginQuestionInput = { type: "dismiss-plugin-question"; ques
 export type ChatInput =
 	| PluginQuestionAnswerInput
 	| PluginProblemSubmissionInput
-	| { type: "text"; text: string; images?: ImageContent[] }
+	| { type: "text"; text: string; images?: ImageContent[]; attachments?: AttachmentRef[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData; occurrence?: PluginSubmissionOccurrence }
 	| { type: "continue" }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
@@ -71,7 +72,7 @@ export type ChatInput =
 	 *  thinking on the ACTIVE problem — one lane (owner 2026-10-05):
 	 *  whether it claims an answer is read from the text. One
 	 *  problem may carry many submissions; each is its own turn. */
-	| { type: "thinking"; problemCallId: string; text: string; images?: ImageContent[]; occurrence?: PluginSubmissionOccurrence }
+	| { type: "thinking"; problemCallId: string; text: string; images?: ImageContent[]; attachments?: AttachmentRef[]; occurrence?: PluginSubmissionOccurrence }
 	/** The practice move-on signal (owner round 16): the learner's
 	 *  explicit go-ahead during the between-problems pause — the Next
 	 *  chip or Enter on an empty composer. Practice sessions only, and
@@ -137,7 +138,7 @@ export function parseDismissInput(input: unknown): DismissInput {
  *  (a send with no live turn is a plain text send, which already exists).
  *  The id is client-minted (steer_<localid>): the queued indicator keys on
  *  it, and the drain's message events upsert the real card by the same id. */
-export type UserSteerInput = { type: "steer"; id: string; text: string; images?: ImageContent[] };
+export type UserSteerInput = { type: "steer"; id: string; text: string; images?: ImageContent[]; attachments?: AttachmentRef[] };
 
 /** Parse and validate a steer event off a request body. */
 export function parseUserSteerInput(input: unknown): UserSteerInput {
@@ -148,10 +149,11 @@ export function parseUserSteerInput(input: unknown): UserSteerInput {
 		throw new ChatInputError("steer input requires a client-minted id");
 	}
 	const images = parseImages(i.images);
-	if (typeof i.text !== "string" || (!i.text.trim() && !images)) {
-		throw new ChatInputError("steer input requires non-empty text or images");
+	const attachments = parseAttachments(i.attachments);
+	if (typeof i.text !== "string" || (!i.text.trim() && !images && !attachments)) {
+		throw new ChatInputError("steer input requires non-empty text, images, or attachments");
 	}
-	return { type: "steer", id: i.id, text: i.text, ...(images ? { images } : {}) };
+	return { type: "steer", id: i.id, text: i.text, ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) };
 }
 
 /** The native appends a dismissal makes (pure — same orphan discipline
@@ -205,6 +207,13 @@ function parseImages(value: unknown): ImageContent[] | undefined {
 		return images.length ? images : undefined;
 	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submission images"); }
 }
+function parseAttachments(value: unknown, allowedKinds?: readonly AttachmentKind[]): AttachmentRef[] | undefined {
+	if (value === undefined) return undefined;
+	try {
+		const attachments = parseAttachmentRefArray(value, allowedKinds);
+		return attachments.length ? attachments : undefined;
+	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submission attachments"); }
+}
 function parseImageChannels(value: unknown): PluginSubmissionImages | undefined {
 	if (value === undefined) return undefined;
 	try {
@@ -212,9 +221,9 @@ function parseImageChannels(value: unknown): PluginSubmissionImages | undefined 
 		return Object.keys(images).length ? images : undefined;
 	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submission image channels"); }
 }
-function parseOptionalOccurrence(value: unknown, images: unknown): PluginSubmissionOccurrence | undefined {
+function parseOptionalOccurrence(value: unknown, hasMedia: unknown): PluginSubmissionOccurrence | undefined {
 	if (value !== undefined) return parsePluginQuestionOccurrence(value);
-	if (images) throw new ChatInputError("Image-bearing submissions require an exact occurrence");
+	if (hasMedia) throw new ChatInputError("Image-bearing submissions require an exact occurrence");
 	return undefined;
 }
 
@@ -241,10 +250,11 @@ export function parseChatInput(input: unknown): ChatInput {
 		}
 		case "text": {
 			const images = parseImages(i.images);
-			if (typeof i.text !== "string" || (!i.text.trim() && !images)) {
-				throw new ChatInputError("text input requires non-empty text or images");
+			const attachments = parseAttachments(i.attachments);
+			if (typeof i.text !== "string" || (!i.text.trim() && !images && !attachments)) {
+				throw new ChatInputError("text input requires non-empty text, images, or attachments");
 			}
-			return { type: "text", text: i.text, ...(images ? { images } : {}) };
+			return { type: "text", text: i.text, ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) };
 		}
 		case "answer": {
 			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
@@ -255,9 +265,15 @@ export function parseChatInput(input: unknown): ChatInput {
 			}
 			const answer = i.answer as QuestionAnswerData;
 			const images = parseImageChannels(answer.images);
-			const occurrence = parseOptionalOccurrence(i.occurrence, images);
-			const { images: _images, ...fields } = answer;
-			return { type: "answer", toolCallId: i.toolCallId, answer: { ...fields, ...(images ? { images } : {}) }, ...(occurrence ? { occurrence } : {}) };
+			const attachments = parseAttachments(answer.attachments, ["image"]);
+			const occurrence = parseOptionalOccurrence(i.occurrence, Boolean(images || attachments));
+			const { images: _images, attachments: _attachments, ...fields } = answer;
+			return {
+				type: "answer",
+				toolCallId: i.toolCallId,
+				answer: { ...fields, ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) },
+				...(occurrence ? { occurrence } : {}),
+			};
 		}
 		case "continue":
 			return { type: "continue" };
@@ -274,11 +290,19 @@ export function parseChatInput(input: unknown): ChatInput {
 				throw new ChatInputError("thinking input requires problemCallId");
 			}
 			const images = parseImages(i.images);
-			const occurrence = parseOptionalOccurrence(i.occurrence, images);
-			if (typeof i.text !== "string" || (!i.text.trim() && !images)) {
-				throw new ChatInputError("thinking input requires non-empty text or images");
+			const attachments = parseAttachments(i.attachments);
+			const occurrence = parseOptionalOccurrence(i.occurrence, Boolean(images || attachments));
+			if (typeof i.text !== "string" || (!i.text.trim() && !images && !attachments)) {
+				throw new ChatInputError("thinking input requires non-empty text, images, or attachments");
 			}
-			return { type: "thinking", problemCallId: i.problemCallId, text: i.text, ...(images ? { images } : {}), ...(occurrence ? { occurrence } : {}) };
+			return {
+				type: "thinking",
+				problemCallId: i.problemCallId,
+				text: i.text,
+				...(images ? { images } : {}),
+				...(attachments ? { attachments } : {}),
+				...(occurrence ? { occurrence } : {}),
+			};
 		}
 		case "next":
 			return { type: "next" };
@@ -308,7 +332,7 @@ export function inputAppends(
 		case "plugin-question-answer":
 			throw new ChatInputError("Plugin question answers require canonical server validation");
 		case "text":
-			return [...dismissalConclusion(record), newUserMessage(input.text, input.images)];
+			return [...dismissalConclusion(record), newUserMessage(input.text, input.images, input.attachments)];
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {
@@ -330,7 +354,7 @@ export function inputAppends(
 				throw new ChatInputError("thinking input targets no active problem");
 			}
 			if (active.pluginProblem) throw new ChatInputError("This problem requires its registered submission editor");
-			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text, input.images)];
+			return [...dismissalConclusion(record), newThinkingMessage(input.problemCallId, input.text, input.images, input.attachments)];
 		}
 		case "next": {
 			// Honest 400s, the thinking gate's discipline: the signal is a
@@ -353,8 +377,8 @@ export function inputAppends(
 export function assertNativeSubmissionTarget(messages: readonly LhMessage[], input: ChatInput): void {
 	if (input.type !== "answer" && input.type !== "thinking") return;
 	const hasImages = input.type === "answer"
-		? Object.values(input.answer.images ?? {}).some(images => images?.length)
-		: !!input.images?.length;
+		? Object.values(input.answer.images ?? {}).some(images => images?.length) || !!input.answer.attachments?.length
+		: !!input.images?.length || !!input.attachments?.length;
 	if (!input.occurrence) {
 		if (hasImages) throw new ChatInputError("Image-bearing submissions require an exact occurrence");
 		return;

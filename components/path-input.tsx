@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { FilePathChip } from "./file-path-chip";
 import { CitationChip } from "./citation-chip";
 import { cn } from "../lib/utils";
+import { extractPastedAttachmentFiles } from "./attachment-staging";
 import {
 	adjacentPathRange, atomicPathRange, clampPathSelection, insertCitation, insertFilePaths, locateToken,
 	normalizePathEdit, normalizePathInputValue, pathInputStaticRange, PathInputHistory, readPathInput, readPathSelection, renderPathInput,
@@ -32,6 +33,8 @@ export type PathInputProps = Omit<React.HTMLAttributes<HTMLDivElement>, "childre
 	fileInsertion?: boolean;
 	/** Native text-input semantics: strip CR/LF and leave Enter to the caller. */
 	singleLine?: boolean;
+	/** Called when image or PDF files are pasted from the clipboard. */
+	onPasteFiles?: (files: File[]) => void;
 };
 
 type Controller = {
@@ -44,13 +47,13 @@ type Controller = {
  * views of it. React never reconciles the editable DOM after a native mutation.
  */
 export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(function PathInput({
-	value, onValueChange, placeholder, autoFocus, defaultDropTarget = false, fileInsertion = true, singleLine = false, className,
+	value, onValueChange, placeholder, autoFocus, defaultDropTarget = false, fileInsertion = true, singleLine = false, onPasteFiles, className,
 	onKeyDown, onFocus, onBlur, onInput, onPaste, onCopy, onCut,
 	onCompositionStart, onCompositionEnd, ...props
 }, forwardedRef) {
 	const rootRef = React.useRef<HTMLDivElement>(null);
 	const controllerRef = React.useRef<Controller | null>(null);
-	const callbacks = React.useRef({ onValueChange, singleLine, fileInsertion });
+	const callbacks = React.useRef({ onValueChange, singleLine, fileInsertion, onPasteFiles });
 	const composing = React.useRef(false);
 	const [chips, setChips] = React.useState<ChipHost[]>([]);
 	// Keep this text child immutable: SSR/hydration gets the complete draft,
@@ -58,7 +61,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 	const initial = React.useRef({ value: normalizePathInputValue(value, singleLine), autoFocus, singleLine });
 
 	React.useImperativeHandle(forwardedRef, () => rootRef.current!, []);
-	React.useLayoutEffect(() => { callbacks.current = { onValueChange, singleLine, fileInsertion }; }, [onValueChange, singleLine, fileInsertion]);
+	React.useLayoutEffect(() => { callbacks.current = { onValueChange, singleLine, fileInsertion, onPasteFiles }; }, [onValueChange, singleLine, fileInsertion, onPasteFiles]);
 
 	React.useLayoutEffect(() => {
 		const root = rootRef.current!;
@@ -216,6 +219,10 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 		function paste(event: ClipboardEvent) {
 			if (event.defaultPrevented) return;
 			event.preventDefault();
+			const pastedFiles = extractPastedAttachmentFiles(event.clipboardData);
+			if (pastedFiles.length > 0) {
+				callbacks.current.onPasteFiles?.(pastedFiles);
+			}
 			const text = event.clipboardData?.getData("text/plain") ?? "";
 			// Image/file/HTML-only clipboard contents are not text replacement.
 			if (text === "") return;

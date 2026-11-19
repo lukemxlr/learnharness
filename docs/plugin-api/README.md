@@ -23,6 +23,7 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 
 ## Modules
 
+- [contracts-attachments](contracts-attachments.md)
 - [contracts-chat](contracts-chat.md)
 - [contracts-graph](contracts-graph.md)
 - [contracts-jobs](contracts-jobs.md)
@@ -151,6 +152,7 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 | [PluginSettingsRow](plugin-ui.md#pluginsettingsrow) | `plugin-ui` |
 | [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema) | `plugin-ui` |
 | [PluginShortcutViewScope](plugin-shortcuts.md#pluginshortcutviewscope) | `plugin-shortcuts` |
+| [PluginStagedImageInput](plugins.md#pluginstagedimageinput) | `plugins` |
 | [PluginStandardComposerProps](plugin-ui.md#pluginstandardcomposerprops) | `plugin-ui` |
 | [PluginSubmission](plugin-submissions.md#pluginsubmission) | `plugin-submissions` |
 | [PluginSubmissionChannel](plugin-submissions.md#pluginsubmissionchannel) | `plugin-submissions` |
@@ -194,6 +196,10 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 
 These are reachable through public data, event, inheritance or helper-type relationships. Types not re-exported from the SDK root cannot be imported by name from that root; access them through public types rather than private app imports.
 
+- [ATTACHMENT_MIME_TYPES](contracts-attachments.md#attachment_mime_types) — `contracts-attachments`
+- [AttachmentKind](contracts-attachments.md#attachmentkind) — `contracts-attachments`
+- [AttachmentMimeType](contracts-attachments.md#attachmentmimetype) — `contracts-attachments`
+- [AttachmentRef](contracts-attachments.md#attachmentref) — `contracts-attachments`
 - [CallUsage](contracts-chat.md#callusage) — `contracts-chat`
 - [ChatKind](contracts-chat.md#chatkind) — `contracts-chat`
 - [ChatSettings](contracts-chat.md#chatsettings) — `contracts-chat`
@@ -256,4 +262,4 @@ These are reachable through public data, event, inheritance or helper-type relat
 
 Standard JavaScript/DOM types (`Promise`, `AbortSignal`, `File`, `HTMLElement`, and utility types) use their standard contracts. Pi model/messages/tools and TypeBox schemas use the exact peer versions declared by the bundled SDK's `package.json`. Supply those peers when typechecking; they are development types, not permission to import private LearnHarness runtime modules.
 
-Coverage: **140 public types**, **57 supporting declarations**, **895 declared member signatures/variants**. Generation contains no build timestamps or absolute source paths.
+Coverage: **141 public types**, **61 supporting declarations**, **906 declared member signatures/variants**. Generation contains no build timestamps or absolute source paths.

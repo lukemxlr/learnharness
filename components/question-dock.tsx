@@ -2,18 +2,20 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ViewReaderRef, NativeQuestionViewState } from "./session-view-readers";
-import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
+import { ArrowDownIcon, ChevronRightIcon, ImagePlusIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
+import { extractPastedAttachmentFiles, StagedAttachments } from "@/components/attachment-staging";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { QuestionPreview } from "@/components/question-preview";
 import { cn } from "@/lib/utils";
 import {
+	ATTACHMENT_INPUT_ACCEPT,
 	buildAnswer,
 	toClientQuestion,
 	normalizeQuizType,
@@ -32,6 +34,7 @@ import {
 	toggleOther,
 	type AnswerRequest,
 	type AskToolInput,
+	type AttachmentRef,
 	type DockSelection,
 	type ExplainToolInput,
 	type QuestionAnswerData,
@@ -110,6 +113,12 @@ export interface QuestionDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	attachments?: readonly AttachmentRef[];
+	uploading?: boolean;
+	uploadError?: string | null;
+	onUploadFiles?: (files: File[]) => void;
+	onRemoveAttachment?: (id: string, index: number) => void;
+	onDismissUploadError?: () => void;
 }
 
 export function QuestionDock({
@@ -131,6 +140,12 @@ export function QuestionDock({
 	dictationClaim = true,
 	compactionRunning = false,
 	workingRef,
+	attachments = [],
+	uploading = false,
+	uploadError = null,
+	onUploadFiles,
+	onRemoveAttachment,
+	onDismissUploadError,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
 	// teach twins for every dock concern — parse dispatch, labels, kinds:
@@ -188,6 +203,12 @@ export function QuestionDock({
 					workingRef={workingRef}
 					dictationClaim={dictationClaim}
 					compactionRunning={compactionRunning}
+					attachments={attachments}
+					uploading={uploading}
+					uploadError={uploadError}
+					onUploadFiles={onUploadFiles}
+					onRemoveAttachment={onRemoveAttachment}
+					onDismissUploadError={onDismissUploadError}
 				/>
 			</div>
 		</>
@@ -281,10 +302,17 @@ function QuestionDockForm({
 	dictationClaim = true,
 	compactionRunning = false,
 	workingRef,
+	attachments = [],
+	uploading = false,
+	uploadError = null,
+	onUploadFiles,
+	onRemoveAttachment,
+	onDismissUploadError,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLDivElement>(null);
+	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	// Canonical QuestionData, built once per question. Quiz options are
 	// deterministically shuffled (seeded by toolCallId) so position never leaks
@@ -394,9 +422,10 @@ function QuestionDockForm({
 
 	const toggle = (idx: number) => setSel(toggleOption(selectMode, sel, idx));
 
+	const hasAttachments = attachments.length > 0;
 	const nativeCanSubmit =
 		qd.mode === "text"
-			? text.trim().length > 0
+			? text.trim().length > 0 || hasAttachments
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
 	const canSubmit = nativeCanSubmit || hasPendingInput?.(qd) === true;
@@ -419,7 +448,7 @@ function QuestionDockForm({
 	const viewPresentationKey = JSON.stringify({ ...toClientQuestion(qd), questionType: qd.questionType });
 	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, sel, other, text, thinking, confIdx, viewPresentationKey]);
 	const submit = () => {
-		if (!canSubmit || compactionRunning || preparing) return;
+		if (!canSubmit || compactionRunning || preparing || uploading) return;
 		if (onPrepareSubmission) {
 			onPrepareSubmission({ question: qd, isCurrent: () => mounted.current && currentQuestion.current === qd && isInteractionScopeEligible(rootRef.current, controller), capture: captureRequest });
 			return;
@@ -436,6 +465,7 @@ function QuestionDockForm({
 		}
 		void finishDictation().then(doSubmit);
 	};
+	const attachmentsRef = useRef(attachments); attachmentsRef.current = attachments;
 	const captureRequest = (): AnswerRequest => {
 		const { sel, other, confIdx } = formValues.current;
 		const req: AnswerRequest = {
@@ -444,6 +474,7 @@ function QuestionDockForm({
 			other: sel.otherSelected ? other : undefined,
 			text: qd.mode === "text" ? answerTextRef.current : undefined,
 			thinking: qd.mode !== "text" ? thinkingTextRef.current.trim() || undefined : undefined,
+			attachments: attachmentsRef.current.length ? attachmentsRef.current.map((a) => ({ ...a })) : undefined,
 			// Always sent on quiz answers (owner: 50 must mean 50, never
 			// "untouched"); buildAnswer drops it on "I don't know".
 			confidence: kind === "quiz" ? CONFIDENCE_STOPS[confIdx] : undefined,
@@ -456,6 +487,7 @@ function QuestionDockForm({
 			other,
 			text: answerTextRef.current,
 			confidenceIndex: confIdx,
+			attachments: attachmentsRef.current.length ? attachmentsRef.current.map((a) => ({ ...a })) : undefined,
 		});
 		return req;
 	};
@@ -612,8 +644,22 @@ function QuestionDockForm({
 			?.scrollIntoView({ block: "nearest" });
 	}, [kbdIdx]);
 
+	const handlePasteFiles = onUploadFiles ? (files: File[]) => { onUploadFiles(files); } : undefined;
+
 	return (
-		<div ref={rootRef} data-testid="question-dock">
+		<div
+			ref={rootRef}
+			data-testid="question-dock"
+			onPaste={(e) => {
+				if (!onUploadFiles || e.defaultPrevented) return;
+				if (e.target instanceof Element && e.target.closest("[data-file-path-input]")) return;
+				const files = extractPastedAttachmentFiles(e.clipboardData);
+				if (files.length > 0) {
+					e.preventDefault();
+					onUploadFiles(files);
+				}
+			}}
+		>
 			{/* Question area — scrolls internally if very tall; the bottom row stays put.
 			    Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
 			    long questions short — owner round, 2026-10-05). */}
@@ -753,6 +799,7 @@ function QuestionDockForm({
 									ref={otherInputRef}
 									singleLine
 									value={other}
+									onPasteFiles={handlePasteFiles}
 									onValueChange={(value) => {
 										setOther(value);
 										// Typing selects the row — displacing in
@@ -909,6 +956,7 @@ function QuestionDockForm({
 					{qd.mode === "text" ? (
 						<PathInput
 							value={text}
+							onPasteFiles={handlePasteFiles}
 							onValueChange={(value) => {
 								answerTextRef.current = value;
 								setText(value);
@@ -939,6 +987,7 @@ function QuestionDockForm({
 						<PathInput
 							ref={thinkingRef}
 							value={thinking}
+							onPasteFiles={handlePasteFiles}
 							onValueChange={(value) => {
 								thinkingTextRef.current = value;
 								setThinking(value);
@@ -972,14 +1021,45 @@ function QuestionDockForm({
 							)}
 						/>
 					)}
+					<StagedAttachments
+						attachments={attachments}
+						uploadingCount={uploading ? 1 : 0}
+						error={uploadError}
+						onRemove={onRemoveAttachment}
+						onDismissError={onDismissUploadError}
+						className="px-2 pt-1 pb-1"
+					/>
 					<div className="flex items-center justify-between gap-2 p-1">
-						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
+						<input
+							ref={fileInputRef}
+							type="file"
+							accept={ATTACHMENT_INPUT_ACCEPT}
+							multiple
+							hidden
+							data-testid="question-attach-input"
+							onChange={(e) => {
+								const files = Array.from(e.currentTarget.files ?? []);
+								e.currentTarget.value = "";
+								if (files.length > 0) onUploadFiles?.(files);
+							}}
+						/>
+						<button
+							type="button"
+							aria-label="Attach image"
+							data-testid="question-attach-button"
+							disabled={uploading || !onUploadFiles}
+							onClick={() => fileInputRef.current?.click()}
+							className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+						>
+							<ImagePlusIcon className="size-4" />
+						</button>
+						<span aria-hidden className="pl-1 text-xs text-muted-foreground">
 								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
 						</span>
 						<Button
 							type="submit"
-							disabled={!canSubmit || compactionRunning || preparing}
-							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+							disabled={!canSubmit || compactionRunning || preparing || uploading}
+							className="ml-auto min-h-11 h-11 rounded-[6px] px-3.5 text-sm font-medium"
 						>
 							Submit answer
 						</Button>

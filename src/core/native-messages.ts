@@ -35,6 +35,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AttachmentRef } from "./contracts/attachments.ts";
 import type { PluginSubmissionImages, PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import { ImmutableReadCache } from "./immutable-data.ts";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
@@ -110,6 +111,8 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 	lhQuestions?: PluginQuestionOccurrenceMap;
 	/** Exact binding for genuine plugin-question results (details stays public envelope). */
 	lhQuestionOccurrence?: PluginQuestionOccurrence;
+	/** Persisted attachment references on user messages, hydrated server-side before LLM calls. */
+	attachments?: AttachmentRef[];
 };
 
 /** Latest response only: never borrow an older process/model's window when
@@ -222,11 +225,16 @@ export function nativeAnswerContent(answerText: string, images?: PluginSubmissio
 	return content;
 }
 
-export function newUserMessage(text: string, images?: readonly ImageContent[]): LhMessage & UserMessage {
+export function newUserMessage(
+	text: string,
+	images?: readonly ImageContent[],
+	attachments?: readonly AttachmentRef[],
+): LhMessage & UserMessage {
 	return {
 		id: newMessageId(),
 		role: "user",
 		content: nativeInlineImageContent(text, images),
+		...(attachments?.length ? { attachments: attachments.map((a) => ({ ...a })) } : {}),
 		timestamp: Date.now(),
 	};
 }
@@ -236,8 +244,19 @@ export function newUserMessage(text: string, images?: readonly ImageContent[]): 
  *  rides agent.steer(), the live stream's message events, and the settled
  *  record, so the optimistic queued indicator and the transcript card
  *  upsert by one identity. */
-export function newUserSteer(text: string, id: string, images?: readonly ImageContent[]): LhMessage & UserMessage {
-	return { id, role: "user", content: nativeInlineImageContent(text, images), timestamp: Date.now() };
+export function newUserSteer(
+	text: string,
+	id: string,
+	images?: readonly ImageContent[],
+	attachments?: readonly AttachmentRef[],
+): LhMessage & UserMessage {
+	return {
+		id,
+		role: "user",
+		content: nativeInlineImageContent(text, images),
+		...(attachments?.length ? { attachments: attachments.map((a) => ({ ...a })) } : {}),
+		timestamp: Date.now(),
+	};
 }
 
 /** The learner's answer — the question call's tool result (fork 1).
@@ -356,14 +375,24 @@ export function newGraphContextMessage(picks: readonly GraphContextPick[], chain
  *  content label is the single "Your thinking"; `details` keeps the raw
  *  payload for the transcript card. One problem may carry many
  *  submissions. */
-export function newThinkingMessage(problemCallId: string, text: string, images?: readonly ImageContent[]): LhMarkerMessage {
+export function newThinkingMessage(
+	problemCallId: string,
+	text: string,
+	images?: readonly ImageContent[],
+	attachments?: readonly AttachmentRef[],
+): LhMarkerMessage {
 	return {
 		id: newMessageId(),
 		role: "custom",
 		customType: "practice-thinking",
 		content: `${THINKING_LABEL}:\n${text}`,
 		display: true,
-		details: { problemCallId, text, ...(images?.length ? { images: images.map(image => ({ ...image })) } : {}) },
+		details: {
+			problemCallId,
+			text,
+			...(images?.length ? { images: images.map(image => ({ ...image })) } : {}),
+			...(attachments?.length ? { attachments: attachments.map(a => ({ ...a })) } : {}),
+		},
 		timestamp: Date.now(),
 	};
 }
@@ -713,8 +742,8 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			});
 			continue;
 		}
-		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
-		const { id: _id, cliContextWindow: _cliContextWindow, lhQuestions: _lhQuestions, lhQuestionOccurrence: _lhQuestionOccurrence, ...native } = m as LhMessage;
+		// Strip app-only id/CLI context/attachment metadata: the wire carries the native shape only.
+		const { id: _id, cliContextWindow: _cliContextWindow, lhQuestions: _lhQuestions, lhQuestionOccurrence: _lhQuestionOccurrence, attachments: _attachments, ...native } = m as LhMessage;
 		// Learner citations are links in the record; the wire carries them
 		// expanded (core/citations.ts) — the one model-facing rewrite.
 		out.push(role === "user" ? expandUserCitations(native as UserMessage) : (native as Message));

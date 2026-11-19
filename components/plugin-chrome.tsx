@@ -70,7 +70,7 @@ function ActionButton({ item, context, captureContext, className, iconOnly = fal
 const SIDEBAR_CONTEXT = { placement: "sidebar", surface: "sidebar" } as const;
 const GRAPH_CONTEXT = { placement: "graph", surface: "graph" } as const;
 const SIDEBAR_BUTTON = "flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
-const TOP_BUTTON = "flex h-9 min-w-0 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+const TOP_BUTTON = "flex min-h-11 min-w-11 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
 /** Core teaching/practice children lead the same row-major grid as placed actions. */
 export function PluginSidebarActions({ children }: { children: ReactNode }) {

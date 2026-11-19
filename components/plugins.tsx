@@ -7,6 +7,7 @@ import { useNotifyHub } from "@/components/server-events";
 import { PluginFrontendManager, type PluginHost, type PluginMount, type PluginSnapshot } from "@/components/plugin-manager";
 import { createPluginUiStore, PluginUiHost } from "@/components/plugin-ui-host";
 import { BUILTIN_MERMAID_LANGUAGE, reservedToolRendererNames } from "@/components/plugin-renderers";
+import { stageOnSurface } from "@/components/plugin-surface-targets";
 
 const EMPTY: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", conflicts: [], loading: true, refreshing: false };
 const emptySubscribe = () => () => {};
@@ -83,6 +84,7 @@ export function PluginsProvider({ children }: { children: ReactNode }) {
 				fetch: (...args) => fetch(...args), importModule: importPluginModule,
 				pathname: () => window.location.pathname, navigate: path => routerRef.current.push(path),
 				openSettings: pluginId => window.dispatchEvent(new CustomEvent("lh:open-plugin-settings", { detail: pluginId })),
+				stageSubmissionImage: stageOnSurface,
 				style: (url, onError) => {
 					const link = document.createElement("link");
 					link.rel = "stylesheet"; link.href = url; link.onerror = onError;

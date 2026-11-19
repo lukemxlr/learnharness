@@ -66,11 +66,12 @@ async function loadBytes(data: Uint8Array, signal?: AbortSignal): Promise<PdfLoa
 	signal?.throwIfAborted();
 	const pdfjs = await loadPdfjs();
 	signal?.throwIfAborted();
+	const normalized = Buffer.isBuffer(data) ? new Uint8Array(data) : data;
 	// The legacy build in plain node runs on a main-thread fake worker (no
 	// workerSrc needed); teardown is the loading task's destroy().
 	// verbosity 0 = errors only — scanned PDFs (JBIG2 XObjects) otherwise
 	// flood the log with per-page warnings (live-smoke finding 2026-09-19).
-	return pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
+	return pdfjs.getDocument({ data: normalized, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
 }
 
 async function openBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTaskLoader = loadBytes) {

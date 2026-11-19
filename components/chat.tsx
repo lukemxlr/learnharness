@@ -8,9 +8,10 @@ import { PluginSubmissionRunner, SubmissionModelEpoch, type SubmissionAttempt } 
 import { submissionImages, type BuiltinSubmissionCapture, type PrepareBuiltinSubmission, type PrepareThinkingSubmission, type PreparePluginQuestionSubmission, type PreparePluginProblemSubmission } from "./plugin-submission-adapters";
 import { SubmittedImages } from "./submitted-images";
 import { usePageSurfaceBoundary, SurfaceRegion } from "./plugin-surfaces";
-import { findSurfaceBoundary } from "./plugin-surface-targets";
+import { findSurfaceBoundary, registerSurfaceStaging } from "./plugin-surface-targets";
 import { scheduleOpeningSubmission } from "./plugin-submission-opening";
-import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSubmission, type PluginSubmissionTarget, type QuestionData } from "@/src/core";
+import { formatAttachmentUploadError, uploadAttachmentFile } from "./attachment-staging";
+import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type AttachmentKind, type AttachmentRef, type PluginSubmission, type PluginSubmissionTarget, type QuestionData } from "@/src/core";
 import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -608,6 +609,132 @@ export function Chat({
 		void resumeStream();
 	}, [resumeStream]);
 
+	const questionTargetKey = pending ? `question:${pending.key}` : null;
+	const practiceTargetKey = activeProblem ? `practice:${activeProblem.toolCallId}` : null;
+	const activeDockTargetKey = questionTargetKey ?? practiceTargetKey ?? (!pluginOwnsDock ? "composer" : null);
+	const activeTargetKeyRef = useRef<string | null>(activeDockTargetKey);
+	activeTargetKeyRef.current = activeDockTargetKey;
+	type StagedTargetBucket = { items: AttachmentRef[]; uploadingCount: number; error: string | null };
+	const emptyStagedBucket: StagedTargetBucket = { items: [], uploadingCount: 0, error: null };
+	const [stagedByTarget, setStagedByTarget] = useState<Record<string, StagedTargetBucket>>({});
+	const stagedByTargetRef = useRef(stagedByTarget);
+	stagedByTargetRef.current = stagedByTarget;
+
+	useLayoutEffect(() => {
+		if (!pending) return;
+		const draftAttachments = questionDraft(pending.key)?.form?.attachments;
+		if (!draftAttachments?.length) return;
+		const key = `question:${pending.key}`;
+		setStagedByTarget((prev) => {
+			if (prev[key]) return prev;
+			return { ...prev, [key]: { items: [...draftAttachments], uploadingCount: 0, error: null } };
+		});
+	}, [pending?.key, questionDraft]);
+
+	const clearTargetAttachments = useCallback((targetKey: string, acceptedIds?: readonly string[]) => {
+		setStagedByTarget((prev) => {
+			const cur = prev[targetKey];
+			if (!cur) return prev;
+			if (acceptedIds && acceptedIds.length > 0) {
+				const drop = new Set(acceptedIds);
+				const remaining = cur.items.filter((item) => !drop.has(item.id));
+				if (remaining.length > 0 || cur.uploadingCount > 0) {
+					return { ...prev, [targetKey]: { ...cur, items: remaining, error: null } };
+				}
+			}
+			const next = { ...prev };
+			delete next[targetKey];
+			return next;
+		});
+	}, []);
+
+	const removeTargetAttachment = useCallback((targetKey: string, id: string, index: number) => {
+		setStagedByTarget((prev) => {
+			const cur = prev[targetKey];
+			if (!cur) return prev;
+			const nextItems = cur.items.filter((item, i) => !(i === index && item.id === id));
+			return { ...prev, [targetKey]: { ...cur, items: nextItems } };
+		});
+	}, []);
+
+	const dismissTargetError = useCallback((targetKey: string) => {
+		setStagedByTarget((prev) => {
+			const cur = prev[targetKey];
+			if (!cur || !cur.error) return prev;
+			return { ...prev, [targetKey]: { ...cur, error: null } };
+		});
+	}, []);
+
+	const uploadFilesForTarget = useCallback(async (targetKey: string, files: File[], allowedKinds?: readonly AttachmentKind[]) => {
+		if (!files.length) return;
+		setStagedByTarget((prev) => {
+			const cur = prev[targetKey] ?? { items: [], uploadingCount: 0, error: null };
+			return { ...prev, [targetKey]: { ...cur, uploadingCount: cur.uploadingCount + files.length, error: null } };
+		});
+		const uploaded: AttachmentRef[] = [];
+		let lastError: string | null = null;
+		for (const file of files) {
+			if (allowedKinds && file.type && !allowedKinds.includes(file.type === "application/pdf" ? "pdf" : "image")) {
+				lastError = "Only image attachments are supported for question answers.";
+				continue;
+			}
+			try {
+				const ref = await uploadAttachmentFile(file);
+				if (allowedKinds && !allowedKinds.includes(ref.kind)) {
+					lastError = "Only image attachments are supported for question answers.";
+					continue;
+				}
+				uploaded.push(ref);
+			} catch (err) {
+				lastError = formatAttachmentUploadError(err);
+			}
+		}
+		setStagedByTarget((prev) => {
+			const cur = prev[targetKey] ?? { items: [], uploadingCount: 0, error: null };
+			const nextItems = [...cur.items];
+			for (const ref of uploaded) {
+				if (!nextItems.some((existing) => existing.id === ref.id)) nextItems.push(ref);
+			}
+			return {
+				...prev,
+				[targetKey]: {
+					items: nextItems,
+					uploadingCount: Math.max(0, cur.uploadingCount - files.length),
+					error: lastError,
+				},
+			};
+		});
+	}, []);
+
+	useEffect(() => {
+		if (!surfaceTarget) return;
+		return registerSurfaceStaging(surfaceTarget, async (image) => {
+			const targetKey = activeTargetKeyRef.current;
+			if (!targetKey) throw new Error("No active submission surface can accept a staged image right now.");
+			const binary = atob(image.data);
+			const bytes = new Uint8Array(binary.length);
+			for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+			const ext = image.mimeType === "image/jpeg" ? "jpg" : image.mimeType === "image/webp" ? "webp" : image.mimeType === "image/gif" ? "gif" : "png";
+			const filename = image.filename?.trim() || `drawing.${ext}`;
+			const file = new File([bytes], filename, { type: image.mimeType });
+			const ref = await uploadAttachmentFile(file);
+			if (targetKey.startsWith("question:") && ref.kind !== "image") {
+				throw new Error("Question answers only support image attachments.");
+			}
+			setStagedByTarget((prev) => {
+				const cur = prev[targetKey] ?? { items: [], uploadingCount: 0, error: null };
+				if (cur.items.some((existing) => existing.id === ref.id)) {
+					return { ...prev, [targetKey]: { ...cur, error: null } };
+				}
+				return { ...prev, [targetKey]: { ...cur, items: [...cur.items, ref], error: null } };
+			});
+		});
+	}, [surfaceTarget]);
+
+	const questionBucket = questionTargetKey ? (stagedByTarget[questionTargetKey] ?? emptyStagedBucket) : emptyStagedBucket;
+	const practiceBucket = practiceTargetKey ? (stagedByTarget[practiceTargetKey] ?? emptyStagedBucket) : emptyStagedBucket;
+	const composerBucket = stagedByTarget.composer ?? emptyStagedBucket;
+
 	// The practice dock's send (ONE lane, owner 2026-10-05): POSTs the
 	// thinking against the ACTIVE problem — whether it claims an answer is
 	// read from the text by the agent, not declared here. Starts a turn;
@@ -617,9 +744,15 @@ export function Chat({
 		(text: string) => {
 			const problem = activeProblemRef.current;
 			if (!problem) return;
-			void send({ type: "thinking", problemCallId: problem.toolCallId, text });
+			const targetKey = `practice:${problem.toolCallId}`;
+			const staged = [...(stagedByTargetRef.current[targetKey]?.items ?? [])];
+			const ids = staged.map((item) => item.id);
+			void send(
+				{ type: "thinking", problemCallId: problem.toolCallId, text, ...(staged.length ? { attachments: staged } : {}) },
+				() => { clearTargetAttachments(targetKey, ids); },
+			);
 		},
-		[send],
+		[send, clearTargetAttachments],
 	);
 
 	// Teach-phase check (W5, vision §2): a pending QUIZ that lands once a
@@ -720,6 +853,8 @@ export function Chat({
 	const prepareBuiltin: PrepareBuiltinSubmission = ({ question, capture, isCurrent }: BuiltinSubmissionCapture) => {
 		const target = builtinTarget(question), original = pending;
 		if (!target || !original || busyRef.current || compacting) return;
+		const questionKey = `question:${original.key}`;
+		if ((stagedByTargetRef.current[questionKey]?.uploadingCount ?? 0) > 0) return;
 		void runSubmission(target, () => {
 			const raw = capture();
 			saveQuestionDraft(original.key, { readingThinking: readingThinkingRef.current });
@@ -733,13 +868,15 @@ export function Chat({
 			return isCurrent() && !busyRef.current && now?.messageId === original.messageId && now.contentIndex === original.contentIndex && now.toolCallId === original.toolCallId && now.tool === original.tool;
 		}, async (prepared, attempt) => {
 			if (prepared.type !== "answer") return false;
-			const raw = validatePluginBuiltinSubmissionAnswer(question, prepared.answer);
-			const answer = buildAnswer(question, { ...raw, ...(prepared.thinking.text ? { thinking: prepared.thinking.text } : {}), ...(requiresReveal && prepared.readingThinking.text ? { readingThinking: prepared.readingThinking.text } : {}) }, original.tool);
+			const staged = [...(stagedByTargetRef.current[questionKey]?.items ?? [])];
+			const stagedIds = staged.map((item) => item.id);
+			const raw = validatePluginBuiltinSubmissionAnswer(question, prepared.answer, { hasAttachments: staged.length > 0 });
+			const answer = buildAnswer(question, { ...raw, ...(staged.length ? { attachments: staged } : {}), ...(prepared.thinking.text ? { thinking: prepared.thinking.text } : {}), ...(requiresReveal && prepared.readingThinking.text ? { readingThinking: prepared.readingThinking.text } : {}) }, original.tool);
 			const images = submissionImages(prepared, target.channels);
 			// Save newer native edits without changing the prepared payload.
 			capture(); saveQuestionDraft(original.key, { readingThinking: readingThinkingRef.current });
 			attempt.deliver();
-			return send({ type: "answer", toolCallId: original.toolCallId, occurrence: target.question.occurrence, answer: { ...answer, ...(images ? { images } : {}) } }, attempt.accepted, original.key, attempt.refused);
+			return send({ type: "answer", toolCallId: original.toolCallId, occurrence: target.question.occurrence, answer: { ...answer, ...(images ? { images } : {}) } }, () => { clearTargetAttachments(questionKey, stagedIds); attempt.accepted(); }, original.key, attempt.refused);
 		});
 	};
 	const thinkingTarget = (): Extract<PluginSubmissionTarget, { type: "thinking" }> | undefined => {
@@ -750,12 +887,16 @@ export function Chat({
 	const prepareThinking: PrepareThinkingSubmission = (capture, clear) => {
 		const target = thinkingTarget();
 		if (!target || busyRef.current || compacting) return;
+		const practiceKey = `practice:${target.problem.occurrence.toolCallId}`;
+		if ((stagedByTargetRef.current[practiceKey]?.uploadingCount ?? 0) > 0) return;
 		let captured = "";
 		void runSubmission(target, () => ({ type: "thinking", content: { text: captured = capture(), images: [] } }), () => !busyRef.current && JSON.stringify(activeProblemOccurrenceOf(submissionLive.current.nativeMessages)) === JSON.stringify(target.problem.occurrence), async (prepared, attempt) => {
 			if (prepared.type !== "thinking") return false;
-			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error("Thinking text or images are required. Your input has been kept.");
+			const staged = [...(stagedByTargetRef.current[practiceKey]?.items ?? [])];
+			const stagedIds = staged.map((item) => item.id);
+			if (!prepared.content.text.trim() && !prepared.content.images.length && !staged.length) throw new Error("Thinking text or attachments are required. Your input has been kept.");
 			attempt.deliver();
-			return send({ type: "thinking", problemCallId: target.problem.occurrence.toolCallId, occurrence: target.problem.occurrence, text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}) }, () => { clear(captured); attempt.accepted(); }, undefined, attempt.refused);
+			return send({ type: "thinking", problemCallId: target.problem.occurrence.toolCallId, occurrence: target.problem.occurrence, text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}), ...(staged.length ? { attachments: staged } : {}) }, () => { clear(captured); clearTargetAttachments(practiceKey, stagedIds); attempt.accepted(); }, undefined, attempt.refused);
 		});
 	};
 	const pluginProblemTarget = (): Extract<PluginSubmissionTarget, { type: "plugin-problem-submission" }> | undefined => {
@@ -806,18 +947,21 @@ export function Chat({
 	const prepareText = (supplied?: string, openingAccepted?: () => void, beforePost?: (captured: string) => boolean) => {
 		const target = textTarget();
 		if (!target || pendingRef.current || pluginOwnsDock || activeProblemRef.current || compacting) return Promise.resolve(false);
+		if ((stagedByTargetRef.current.composer?.uploadingCount ?? 0) > 0) return Promise.resolve(false);
 		if (!busyRef.current && zeroKeys) { setSetupOpen(true); return Promise.resolve(false); }
 		if (!busyRef.current && selectedModelUnavailable(catalog, selectedModel)) { openModelPicker(); return Promise.resolve(false); }
 		let captured = "", capturedRevision = 0;
 		return runSubmission(target, () => { capturedRevision = composerEditRevision.current; return { type: "text", content: { text: captured = supplied ?? textRef.current.trim(), images: [] } }; }, () => submissionLive.current.ready && !pendingQuestionOf(submissionLive.current.nativeMessages) && !pendingPluginQuestionOf(submissionLive.current.nativeMessages) && !activeProblemOf(submissionLive.current.nativeMessages), async (prepared, attempt) => {
 			if (prepared.type !== "text") return false;
-			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error("Message text or images are required. Your input has been kept.");
+			const staged = [...(stagedByTargetRef.current.composer?.items ?? [])];
+			const stagedIds = staged.map((item) => item.id);
+			if (!prepared.content.text.trim() && !prepared.content.images.length && !staged.length) throw new Error("Message text or attachments are required. Your input has been kept.");
 			if (beforePost && !beforePost(captured)) { attempt.cancel(); return false; }
 			draftRef.current = captured;
-			const accepted = () => { if (composerEditRevision.current === capturedRevision && textRef.current.trim() === captured) applyText(""); openingAccepted?.(); attempt.accepted(); };
+			const accepted = () => { if (composerEditRevision.current === capturedRevision && textRef.current.trim() === captured) applyText(""); clearTargetAttachments("composer", stagedIds); openingAccepted?.(); attempt.accepted(); };
 			attempt.deliver();
-			if (busyRef.current) return steer(prepared.content.text, prepared.content.images, accepted, attempt.refused);
-			return send({ type: "text", text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}) }, accepted, undefined, attempt.refused);
+			if (busyRef.current) return steer(prepared.content.text, prepared.content.images, accepted, attempt.refused, staged);
+			return send({ type: "text", text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}), ...(staged.length ? { attachments: staged } : {}) }, accepted, undefined, attempt.refused);
 		});
 	};
 
@@ -1133,7 +1277,7 @@ export function Chat({
 		);
 	const sendNext = useCallback(() => {
 		if (!nextReady || submissionRunner.occupied) return;
-		if (pendingTextInput) { void prepareText(); return; }
+		if (pendingTextInput || (stagedByTargetRef.current.composer?.items.length ?? 0) > 0) { void prepareText(); return; }
 		void send({ type: "next" });
 	}, [nextReady, send, submissionRunner, pendingTextInput]);
 
@@ -1893,7 +2037,7 @@ export function Chat({
 								// assistant group — is gone). Never a user bubble: the wake is
 								// scaffolding; the model-facing instruction lives in the adapter.
 								<PhaseDivider key={m.id || `m-${mi}`} phase="plan" />
-							) : m.role === "user" && m.parts.length > 0 && m.parts.every((p) => p.type.startsWith("data-")) ? (
+							) : m.role === "user" && m.parts.length > 0 && m.parts.every((p) => p.type.startsWith("data-") && p.type !== "data-attachments") ? (
 								// Marker cards (custom messages, 2026-10-04): user-side
 								// scaffolding — the graph-context pick, the practice
 								// thinking trace — render as cards in the transcript
@@ -1986,10 +2130,21 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
-													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
-												</div>
-												<SubmittedImages images={m.parts.filter((part) => part.type === "image").map(part => ({ type: "image" as const, data: part.data as string, mimeType: part.mimeType as string }))} />
+												{(() => {
+													const userText = m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n");
+													const userImages = m.parts.filter((part) => part.type === "image").map(part => ({ type: "image" as const, data: part.data as string, mimeType: part.mimeType as string }));
+													const userAttachments = m.parts.flatMap((part) => (part.type === "data-attachments" && Array.isArray(part.data) ? (part.data as AttachmentRef[]) : []));
+													return (
+														<>
+															{userText.length > 0 && (
+																<div className="lh-prose whitespace-pre-wrap text-foreground">
+																	<PathText text={userText} />
+																</div>
+															)}
+															<SubmittedImages images={userImages} attachments={userAttachments} />
+														</>
+													);
+												})()}
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -2177,6 +2332,18 @@ export function Chat({
 					onRetrySync={() => { void reconcile(); }}
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
 					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.key, { form }); }}
+					questionAttachments={questionBucket.items}
+					questionUploading={questionBucket.uploadingCount > 0}
+					questionUploadError={questionBucket.error}
+					onUploadQuestionFiles={questionTargetKey ? (files) => { void uploadFilesForTarget(questionTargetKey, files, ["image"]); } : undefined}
+					onRemoveQuestionAttachment={questionTargetKey ? (id, index) => removeTargetAttachment(questionTargetKey, id, index) : undefined}
+					onDismissQuestionUploadError={questionTargetKey ? () => dismissTargetError(questionTargetKey) : undefined}
+					practiceAttachments={practiceBucket.items}
+					practiceUploading={practiceBucket.uploadingCount > 0}
+					practiceUploadError={practiceBucket.error}
+					onUploadPracticeFiles={practiceTargetKey ? (files) => { void uploadFilesForTarget(practiceTargetKey, files); } : undefined}
+					onRemovePracticeAttachment={practiceTargetKey ? (id, index) => removeTargetAttachment(practiceTargetKey, id, index) : undefined}
+					onDismissPracticeUploadError={practiceTargetKey ? () => dismissTargetError(practiceTargetKey) : undefined}
 					workingRef={workingRef}
 					practice={activeProblem}
 					pluginPractice={activeProblem?.pluginProblem && activeProblemOccurrence ? {
@@ -2245,6 +2412,12 @@ export function Chat({
 							nextProblem={nextReady}
 							onNext={sendNext}
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							attachments={composerBucket.items}
+							uploading={composerBucket.uploadingCount > 0}
+							uploadError={composerBucket.error}
+							onUploadFiles={(files) => { void uploadFilesForTarget("composer", files); }}
+							onRemoveAttachment={(id, index) => removeTargetAttachment("composer", id, index)}
+							onDismissUploadError={() => dismissTargetError("composer")}
 						/>
 					}
 					onSubmitAnswer={(output) => {
@@ -2259,9 +2432,12 @@ export function Chat({
 						// check answer is its only carrier.
 						saveQuestionDraft(pending.key, { readingThinking: readingThinkingRef.current });
 						const reading = readingThinkingRef.current.trim() || undefined;
+						const questionKey = `question:${pending.key}`;
+						const staged = stagedByTargetRef.current[questionKey]?.items ?? [];
+						const withAttachments = staged.length && !output.attachments?.length ? { ...output, attachments: staged } : output;
 						// The pending-id effect clears this only when the question
 						// actually leaves. An offline preflight keeps the draft visible.
-						const send = () => submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						const send = () => submitAnswer(pending.tool, pending.toolCallId, reading ? { ...withAttachments, readingThinking: reading } : withAttachments, pending.key);
 						// Never wait for the helper. The server atomically appends new
 						// raw side updates with this main answer.
 						send();
@@ -2500,6 +2676,18 @@ export function DockOverlay({
 	pluginQuestion, pluginDraft, pluginAvailable, pluginReady, onPluginMicAvailable, onPluginSend, onPluginDismiss, unreadablePlugin, reconciliation, onRetrySync,
 	initialQuestionDraft,
 	onSaveQuestionDraft,
+	questionAttachments,
+	questionUploading,
+	questionUploadError,
+	onUploadQuestionFiles,
+	onRemoveQuestionAttachment,
+	onDismissQuestionUploadError,
+	practiceAttachments,
+	practiceUploading,
+	practiceUploadError,
+	onUploadPracticeFiles,
+	onRemovePracticeAttachment,
+	onDismissPracticeUploadError,
 	workingRef,
 	practice, pluginPractice,
 	compactionRunning,
@@ -2548,6 +2736,18 @@ export function DockOverlay({
 	onRetrySync(): void;
 	initialQuestionDraft?: QuestionFormDraft;
 	onSaveQuestionDraft: (draft: QuestionFormDraft) => void;
+	questionAttachments?: readonly AttachmentRef[];
+	questionUploading?: boolean;
+	questionUploadError?: string | null;
+	onUploadQuestionFiles?: (files: File[]) => void;
+	onRemoveQuestionAttachment?: (id: string, index: number) => void;
+	onDismissQuestionUploadError?: () => void;
+	practiceAttachments?: readonly AttachmentRef[];
+	practiceUploading?: boolean;
+	practiceUploadError?: string | null;
+	onUploadPracticeFiles?: (files: File[]) => void;
+	onRemovePracticeAttachment?: (id: string, index: number) => void;
+	onDismissPracticeUploadError?: () => void;
 	/** The dock's current unsubmitted working, for the side thread. */
 	workingRef?: { current: string };
 	/** Compaction running for this chat (round 14) — the docks' submit
@@ -3031,6 +3231,12 @@ export function DockOverlay({
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
+									attachments={questionAttachments}
+									uploading={questionUploading}
+									uploadError={questionUploadError}
+									onUploadFiles={onUploadQuestionFiles}
+									onRemoveAttachment={onRemoveQuestionAttachment}
+									onDismissUploadError={onDismissQuestionUploadError}
 								/>
 							) : pluginPractice ? (
 								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
@@ -3050,6 +3256,12 @@ export function DockOverlay({
 									preparing={preparing}
 									onEscape={dictationCancel}
 									compactionRunning={compactionRunning}
+									attachments={practiceAttachments}
+									uploading={practiceUploading}
+									uploadError={practiceUploadError}
+									onUploadFiles={onUploadPracticeFiles}
+									onRemoveAttachment={onRemovePracticeAttachment}
+									onDismissUploadError={onDismissPracticeUploadError}
 								/>
 							) : (
 								composer

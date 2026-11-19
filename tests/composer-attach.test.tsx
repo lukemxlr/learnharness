@@ -20,7 +20,7 @@ import { InteractionLayersProvider, useInteractionLayers, type InteractionLayers
 let cleanup: (() => Promise<void>) | undefined;
 afterEach(async () => { await cleanup?.(); cleanup = undefined; });
 
-async function fixture({ desktop = true } = {}) {
+async function fixture({ desktop = true, onUploadFiles }: { desktop?: boolean; onUploadFiles?: (files: File[]) => void } = {}) {
 	const { window: win, document: doc } = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = doc.body;
 	Object.defineProperty(doc, "activeElement", { get: () => active });
@@ -60,7 +60,7 @@ async function fixture({ desktop = true } = {}) {
 	let controller!: InteractionLayersController;
 	function Harness() {
 		controller = useInteractionLayers();
-		return <div data-testid="clipping-dock" data-attachment-composer="" style={{ overflow: "hidden" }}><Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => { sends++; }} onStop={() => {}} canSend /></div>;
+		return <div data-testid="clipping-dock" data-attachment-composer="" style={{ overflow: "hidden" }}><Composer busy={false} value={value} onChange={(next) => { value = next; draw(); }} onSend={() => { sends++; }} onStop={() => {}} canSend onUploadFiles={onUploadFiles} /></div>;
 	}
 	function draw() { root.render(<InteractionLayersProvider><Harness /></InteractionLayersProvider>); }
 	await act(async () => { draw(); });
@@ -181,7 +181,7 @@ describe("composer attach button", () => {
 		const attach = html.indexOf('data-testid="attach-files"');
 		const send = html.indexOf('aria-label="Send"');
 		assert.ok(editor >= 0 && editor < attach && attach < send, "the paperclip follows the input and precedes Send");
-		assert.ok(html.includes('type="file"') && !html.includes("accept="), "any file type");
+		assert.ok(html.includes('type="file"') && html.includes('accept="image/*,application/pdf"'), "image and PDF accept filter");
 	});
 
 	it("desktop: the button offers Files/Folder, and Files keeps multi-file any-type chips at the caret", async () => {
@@ -287,12 +287,25 @@ describe("composer attach button", () => {
 		assert.equal(f.sends, 0);
 	});
 
-	it("browser: the button stays inert and the picker never opens", async () => {
+	it("browser without upload handler: the button stays inert and the picker never opens", async () => {
 		const f = await fixture({ desktop: false });
 		assert.equal(f.button.getAttribute("aria-disabled"), "true");
 		await act(async () => { f.button.click(); });
 		assert.equal(f.pickerClicks, 0);
 		await f.pick([f.file("a.pdf", "/a.pdf")]);
+		assert.equal(f.value, "readthis");
+	});
+	it("browser with onUploadFiles: clicking opens the picker and forwards picked files without reading bytes locally", async () => {
+		const uploaded: File[][] = [];
+		const f = await fixture({ desktop: false, onUploadFiles: (files) => { uploaded.push(files); } });
+		assert.equal(f.button.getAttribute("aria-disabled"), "false");
+		await act(async () => { f.button.click(); });
+		assert.equal(f.pickerClicks, 1);
+		const pdf = f.file("a.pdf");
+		await f.pick([pdf]);
+		assert.equal(uploaded.length, 1);
+		assert.equal(uploaded[0]?.[0], pdf);
+		assert.equal(f.byteReads, 0);
 		assert.equal(f.value, "readthis");
 	});
 });

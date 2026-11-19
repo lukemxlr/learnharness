@@ -1,199 +1,380 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
-import type { PluginAction, PluginFrontendContext, PluginNotification, PluginSettingsSchema } from "learnharness-plugin-api";
-import type { Capture, Draft, SessionSheet, Sheets } from "../src/state.ts";
+import type { PluginFrontendContext, PluginSessionViewInput } from "learnharness-plugin-api";
+import { exportSheet } from "../src/capture.ts";
+import { mountSheet } from "../src/sheet.ts";
+import { draftStorageKey, Sheets } from "../src/state.ts";
 
-const project = fileURLToPath(new URL("../", import.meta.url));
-// Original frontend/state/pose/submission code; only browser mounting, palette
-// reads, raster I/O and export I/O are controlled. No production test hooks.
-const bundle = await build({ stdin: { contents: `export {activate} from ${JSON.stringify(path.join(project, "src/main.ts"))};`,
-  resolveDir: project, loader: "ts" }, bundle: true, write: false, platform: "node", format: "esm",
-  plugins: [{ name: "controlled-theme-io", setup(builder) {
-    builder.onLoad({ filter: /\/src\/theme\.ts$/ }, () => ({ loader: "js", contents: `
-      export const appPalette=()=>globalThis.__drawingThemeRace.palette;
-      export const recolorReference=(draft,ctx,signal)=>globalThis.__drawingThemeRace.render(draft,signal);` }));
-    builder.onLoad({ filter: /\/src\/capture\.ts$/ }, () => ({ loader: "js", contents: `
-      export const exportSheet=async(captured,signal)=>{signal.throwIfAborted();const probe=globalThis.__drawingThemeRace;
-        probe.exports.push(captured);if(probe.exportWait)await probe.exportWait;
-        return {type:'image',mimeType:'image/png',data:'controlled-png'};};` }));
-    builder.onLoad({ filter: /\/src\/sheet\.ts$/ }, () => ({ loader: "js", contents: `
-      export const mountSheet=(_container,_ctx,sheets,state,input)=>{const probe=globalThis.__drawingThemeRace;Object.assign(probe,{sheets,state});
-        probe.mounts.push({input,draft:state.draft});
-        return {flush(){},dispose(){},canUseEditingShortcuts(){return false},canUndo(){return false},undo(){},togglePenEraser(){},selectHand(){}};};` }));
-  } }] });
-const { activate } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`) as {
-  activate: typeof import("../src/main.ts").activate;
-};
-function deferred<T>() {
-  let resolve!: (value: T) => void, reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
+interface FakeListener { (event: any): void }
+
+class FakeElement {
+  tagName: string;
+  className = "";
+  children: FakeElement[] = [];
+  parent: FakeElement | null = null;
+  attributes = new Map<string, string>();
+  dataset: Record<string, string> = {};
+  style: Record<string, string> = {};
+  listeners = new Map<string, Set<FakeListener>>();
+  hidden = false;
+  disabled = false;
+  tabIndex = 0;
+  value = "";
+  min = "";
+  max = "";
+  step = "";
+  type = "";
+  title = "";
+  textContent = "";
+  private _innerHTML = "";
+  clientWidth = 820;
+  clientHeight = 1120;
+  width = 820;
+  height = 1120;
+  canvasOps: string[] = [];
+
+  constructor(tagName: string) {
+    this.tagName = tagName.toUpperCase();
+  }
+
+  get innerHTML() { return this._innerHTML; }
+  set innerHTML(val: string) { this._innerHTML = val; }
+
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, String(value));
+  }
+  getAttribute(name: string) {
+    return this.attributes.get(name) ?? null;
+  }
+  removeAttribute(name: string) {
+    this.attributes.delete(name);
+  }
+  append(...nodes: (FakeElement | string)[]) {
+    for (const node of nodes) {
+      if (typeof node === "string") {
+        this.textContent += node;
+      } else {
+        node.parent = this;
+        this.children.push(node);
+      }
+    }
+  }
+  replaceChildren(...nodes: FakeElement[]) {
+    this.children = [];
+    this.textContent = "";
+    this.append(...nodes);
+  }
+  remove() {
+    if (!this.parent) return;
+    const idx = this.parent.children.indexOf(this);
+    if (idx >= 0) this.parent.children.splice(idx, 1);
+    this.parent = null;
+  }
+  contains(other: unknown): boolean {
+    if (other === this) return true;
+    return this.children.some(child => child.contains(other));
+  }
+  closest() { return null; }
+  focus() {}
+  getBoundingClientRect() {
+    return { left: 0, top: 0, width: this.clientWidth, height: this.clientHeight, right: this.clientWidth, bottom: this.clientHeight };
+  }
+  addEventListener(type: string, listener: FakeListener, opts?: { once?: boolean; signal?: AbortSignal }) {
+    let set = this.listeners.get(type);
+    if (!set) { set = new Set(); this.listeners.set(type, set); }
+    const wrapped: FakeListener = opts?.once
+      ? (e) => { set!.delete(wrapped); listener(e); }
+      : listener;
+    set.add(wrapped);
+    opts?.signal?.addEventListener("abort", () => set?.delete(wrapped), { once: true });
+  }
+  removeEventListener(type: string, listener: FakeListener) {
+    this.listeners.get(type)?.delete(listener);
+  }
+  dispatchEvent(event: Record<string, any>) {
+    event.preventDefault ??= () => {};
+    event.stopPropagation ??= () => {};
+    const set = this.listeners.get(event.type);
+    if (set) for (const fn of [...set]) fn(event);
+  }
+  click() {
+    if (this.disabled) return;
+    this.dispatchEvent({ type: "click" });
+  }
+  setPointerCapture() {
+    throw new Error("Simulated WebKit synthetic pointer capture failure");
+  }
+  hasPointerCapture() { return false; }
+  releasePointerCapture() {}
+  querySelector(selector: string): FakeElement | null {
+    return this.querySelectorAll(selector)[0] ?? null;
+  }
+  querySelectorAll(selector: string): FakeElement[] {
+    const out: FakeElement[] = [];
+    const visit = (el: FakeElement) => {
+      for (const child of el.children) {
+        if (matches(child, selector)) out.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return out;
+  }
+  getContext() {
+    const ops = this.canvasOps;
+    const w = this.width;
+    const h = this.height;
+    return {
+      fillStyle: "",
+      strokeStyle: "",
+      lineCap: "",
+      lineJoin: "",
+      lineWidth: 1,
+      globalCompositeOperation: "source-over",
+      resetTransform() { ops.length = 0; },
+      setTransform() {},
+      save() {},
+      restore() {},
+      clearRect() { ops.push("clearRect"); },
+      fillRect() { ops.push(`fillRect:${this.fillStyle}`); },
+      beginPath() {},
+      moveTo(x: number, y: number) { ops.push(`move:${x},${y}`); },
+      lineTo(x: number, y: number) { ops.push(`line:${x},${y}`); },
+      quadraticCurveTo() {},
+      arc() { ops.push("arc"); },
+      fill() { ops.push(`fill:${this.fillStyle}`); },
+      stroke() { ops.push(`stroke:${this.strokeStyle}:${this.lineWidth}`); },
+      drawImage() { ops.push("drawImage"); },
+      getImageData() {
+        const hasInk = ops.some(op => op.startsWith("stroke:") || op.startsWith("fill:"));
+        const data = new Uint8ClampedArray(Math.max(4, w * h * 4));
+        if (hasInk) data[3] = 255;
+        return { data };
+      },
+    };
+  }
+  toDataURL(mime: string) {
+    assert.equal(mime, "image/png");
+    const tag = Buffer.from(this.canvasOps.join("|")).toString("base64");
+    return `data:image/png;base64,${tag}`;
+  }
 }
-const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-type Raster = Pick<Draft, "background" | "backgroundColor">;
-type Render = ReturnType<typeof deferred<Raster>> & { draft: Draft; signal: AbortSignal };
-async function fixture(kind: "teaching" | "practice" = "practice") {
-  const observers = new Set<() => void>(), actions = new Map<string, PluginAction>();
-  const notifications = new Set<(event: PluginNotification) => void>();
-  let schema!: PluginSettingsSchema;
-  const owner = new AbortController(), errors: unknown[][] = [];
-  const probe = { palette: { key: "dark", mode: "dark" }, renders: [] as Render[], exports: [] as Capture[],
-    mounts: [] as { input: unknown; draft: Draft | undefined }[],
-    sheets: undefined as Sheets | undefined, state: undefined as SessionSheet | undefined, exportWait: undefined as Promise<void> | undefined,
-    render(draft: Draft, signal: AbortSignal) {
-      const pending = { ...deferred<Raster>(), draft, signal }; this.renders.push(pending);
-      const abort = () => pending.reject(signal.reason);
-      signal.addEventListener("abort", abort, { once: true });
-      return pending.promise.finally(() => signal.removeEventListener("abort", abort));
-    },
+
+function matches(el: FakeElement, selector: string): boolean {
+  if (selector.startsWith(".")) {
+    const cls = selector.slice(1);
+    return el.className.split(/\s+/).includes(cls);
+  }
+  const tagClassMatch = /^([a-z0-9-]+)\.([a-z0-9-]+)$/i.exec(selector);
+  if (tagClassMatch) {
+    return el.tagName.toLowerCase() === tagClassMatch[1]!.toLowerCase() &&
+      el.className.split(/\s+/).includes(tagClassMatch[2]!);
+  }
+  const attrMatch = /^\[([a-z0-9-]+)(?:="([^"]*)")?\]$/i.exec(selector);
+  if (attrMatch) {
+    const val = el.getAttribute(attrMatch[1]!);
+    return attrMatch[2] !== undefined ? val === attrMatch[2] : val !== null;
+  }
+  return el.tagName.toLowerCase() === selector.toLowerCase();
+}
+
+function withFakeDom(run: (ctx: {
+  rootEl: FakeElement;
+  storage: Map<string, string>;
+  markdownCalls: string[];
+}) => Promise<void> | void): Promise<void> {
+  const storage = new Map<string, string>();
+  const markdownCalls: string[] = [];
+  const docEl = new FakeElement("html");
+  docEl.attributes.set("class", "dark");
+  (docEl as any).classList = { contains: (c: string) => c === "dark" };
+  const fakeDoc = {
+    documentElement: docEl,
+    body: new FakeElement("body"),
+    activeElement: null as FakeElement | null,
+    createElement: (tag: string) => new FakeElement(tag),
   };
-  const originals = ["document", "MutationObserver", "__drawingThemeRace"].map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const);
+  const origDoc = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const origWin = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const origResize = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+  const origStyle = Object.getOwnPropertyDescriptor(globalThis, "getComputedStyle");
+  const origStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const origHtmlEl = Object.getOwnPropertyDescriptor(globalThis, "HTMLElement");
+
+  const mockStorage: Storage = {
+    get length() { return storage.size; },
+    clear() { storage.clear(); },
+    getItem(k: string) { return storage.get(k) ?? null; },
+    key(i: number) { return [...storage.keys()][i] ?? null; },
+    removeItem(k: string) { storage.delete(k); },
+    setItem(k: string, v: string) { storage.set(k, String(v)); },
+  };
+
   Object.defineProperties(globalThis, {
-    document: { configurable: true, value: { documentElement: {} } },
-    MutationObserver: { configurable: true, value: class {
-      constructor(private callback: () => void) {} observe() { observers.add(this.callback); } disconnect() { observers.delete(this.callback); }
-    } },
-    __drawingThemeRace: { configurable: true, value: probe },
+    document: { configurable: true, value: fakeDoc },
+    window: { configurable: true, value: { devicePixelRatio: 1, localStorage: mockStorage, addEventListener() {}, removeEventListener() {} } },
+    localStorage: { configurable: true, value: mockStorage },
+    ResizeObserver: { configurable: true, value: class { observe() {} disconnect() {} } },
+    HTMLElement: { configurable: true, value: FakeElement },
+    getComputedStyle: { configurable: true, value: () => ({ getPropertyValue: (n: string) => n === "--background" ? "#141414" : "", backgroundColor: "#141414" }) },
   });
-  const previousError = console.error; console.error = (...values: unknown[]) => { errors.push(values); };
-  let interceptor!: Parameters<PluginFrontendContext["registerSubmissionInterceptor"]>[0];
-  let poseRead = () => Promise.resolve({ sessionId: "s", poses: [] as string[] });
-  const ctx = {
-    manifest: { id: "drawing-pad" }, signal: owner.signal, cleanup() {}, refreshActions() {}, refreshSubmissions() {},
-    app: { pathname: () => "/controlled-session" }, onNotification(fn: (event: PluginNotification) => void) { notifications.add(fn); return () => notifications.delete(fn); },
-    onAppEvent() { return () => {}; }, onResync() { return () => {}; }, registerSettings(value: PluginSettingsSchema) {
-      schema = value; return { update(value: PluginSettingsSchema) { schema = value; }, dispose() {} };
-    },
-    registerAction(value: PluginAction) { actions.set(value.id, value); return () => actions.delete(value.id); }, placeAction() { return () => {}; },
-    registerSubmissionInterceptor(value: typeof interceptor) { interceptor = value; return () => {}; },
-    ui: { openSurface(_target: unknown, props: { content: (container: HTMLElement, signal: AbortSignal) => unknown }) {
-      props.content({} as HTMLElement, owner.signal); return { update() {}, dispose() {} };
-    } },
-    async call(name: string) {
-      if (name === "get-settings") return { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 };
-      if (name === "get-session-poses") return poseRead();
-      throw new Error(name);
+
+  const rootEl = new FakeElement("div");
+  return Promise.resolve(run({ rootEl, storage, markdownCalls })).finally(() => {
+    for (const [name, desc] of [
+      ["document", origDoc],
+      ["window", origWin],
+      ["ResizeObserver", origResize],
+      ["getComputedStyle", origStyle],
+      ["localStorage", origStorage],
+      ["HTMLElement", origHtmlEl],
+    ] as const) {
+      if (desc) Object.defineProperty(globalThis, name, desc);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  });
+}
+
+function fakeCtx(markdownCalls: string[]): PluginFrontendContext {
+  return {
+    ui: {
+      mountMarkdown(container: HTMLElement, props: { text: string }) {
+        markdownCalls.push(props.text);
+        (container as unknown as FakeElement).textContent = props.text;
+        return { update() {}, dispose() {} };
+      },
     },
   } as unknown as PluginFrontendContext;
-  const off = await activate(ctx);
-  await actions.get("draw")!.run({ surface: "session", surfaceTarget: {} as never, sessionId: "s", kind,
-    view: { messages: [], input: { type: "text" } } } as never);
-  const sheets = probe.sheets!, state = probe.state!;
-  const create = (palette = "dark", backgroundColor = "#141414", question = "ORIGINAL") => {
-    sheets.create(state, { background: "reference-" + palette, backgroundColor, width: 600, height: 100, pixelRatio: 1, palette,
-      reference: { label: "Question", question, options: [], multiple: false } });
-    sheets.update(state, [{ tool: "pen", points: [{ x: 20, y: 20, pressure: .5 }, { x: 100, y: 100, pressure: .5 }] }]);
-  };
-  create();
-  return { probe, sheets, state, create, errors, schema: () => schema,
-    notify(value: unknown) { for (const fn of notifications) fn({ pluginId: "drawing-pad", topic: "settings-changed", data: value }); },
-    setPoseRead(read: typeof poseRead) { poseRead = read; },
-    async theme(key: string, mode: string) { probe.palette = { key, mode }; for (const fn of observers) fn(); await settle(); },
-    async toggle(input: unknown = { type: "text" }) { await actions.get("draw")!.run({ surface: "session", surfaceTarget: {} as never, sessionId: "s", kind,
-      view: { messages: [], input } } as never); },
-    async submit(accept = false) {
-      const accepted: (() => void)[] = [];
-      const result = await interceptor.intercept({ type: "text", content: { text: "controlled", images: [] } }, {
-        sessionId: "s", signal: owner.signal, messages: [], onAccepted(fn: () => void) { accepted.push(fn); },
-      } as never);
-      if (accept) for (const fn of accepted) fn();
-      return result;
-    },
-    async dispose() {
-      off(); await settle(); assert.equal(observers.size, 0); console.error = previousError;
-      for (const [name, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }
-    },
-  };
 }
-it("the first open after a closed teaching drawing is accepted discards its empty raster before mounting the new input", async () => {
-  const f = await fixture("teaching");
-  try {
-    const original = f.state.draft!;
-    await f.toggle(); // Close with unfinished ink; closing must retain it.
-    assert.equal(f.state.draft, original);
-    await f.submit(true);
-    assert.equal(f.state.draft!.id, original.id); assert.equal(f.state.draft!.strokes.length, 0);
-    const next = { type: "answer", question: { id: "Q2", question: "NEXT QUESTION", occurrence: { messageId: "m-Q2", contentIndex: 0, toolCallId: "Q2", toolName: "quiz" } } };
-    await f.toggle(next);
-    assert.equal(f.probe.mounts.at(-1)!.draft, undefined, "the first mount must prepare Q2, not reuse Q1's accepted empty raster");
-    assert.equal(f.probe.mounts.at(-1)!.input, next);
-    assert.equal(original.strokes.length, 1, "already captured attempts remain immutable");
-  } finally { await f.dispose(); }
-});
-it("a genuine reopen preserves unfinished original work and newer edits protected from an older acceptance", async () => {
-  const f = await fixture("teaching");
-  try {
-    const captured = f.sheets.capture(f.state)!;
-    f.sheets.update(f.state, [...captured.draft.strokes, ...captured.draft.strokes]);
-    f.sheets.setPan(f.state, { x: 17, y: -23 });
-    const latest = f.state.draft!;
-    await f.toggle(); f.sheets.accepted(captured);
-    await f.toggle({ type: "text" });
-    assert.equal(f.probe.mounts.at(-1)!.draft, latest); assert.equal(f.state.draft, latest);
-    assert.equal(latest.reference!.question, "ORIGINAL"); assert.equal(latest.background, "reference-dark");
-    assert.equal(latest.strokes.length, 2); assert.deepEqual(f.state.pan, { x: 17, y: -23 });
-    assert.equal(f.sheets.pending(f.state), true);
-  } finally { await f.dispose(); }
-});
-it("DP-IR-1: a mode change during practice pose synchronization waits for the current raster at capture, then freezes that attempt", async () => {
-  const f = await fixture(), pose = deferred<{ sessionId: string; poses: string[] }>(), exporting = deferred<void>();
-  try {
-    f.setPoseRead(() => pose.promise); f.probe.exportWait = exporting.promise;
-    const sending = f.submit(); await settle(); assert.equal(f.probe.exports.length, 0);
-    await f.theme("light", "light"); assert.equal(f.probe.renders.length, 1);
-    pose.resolve({ sessionId: "s", poses: [] }); await settle();
-    assert.equal(f.probe.exports.length, 0, "export must not capture the old dark palette while the light raster is pending");
-    f.probe.renders[0]!.resolve({ background: "light-original", backgroundColor: "#ffffff" }); await settle();
-    const captured = f.probe.exports[0]!; assert.ok(captured);
-    assert.equal(captured.draft.palette, "light"); assert.equal(captured.draft.background, "light-original"); assert.equal(captured.color, "#000000");
-    await f.theme("new-dark", "dark"); f.probe.renders[1]!.resolve({ background: "new-dark-original", backgroundColor: "#202020" }); await settle();
-    assert.equal(captured.draft.background, "light-original"); assert.equal(captured.color, "#000000", "later palette edits cannot mutate the attempt snapshot");
-    exporting.resolve(); await sending;
-  } finally { pose.resolve({ sessionId: "s", poses: [] }); exporting.resolve(); await f.dispose(); }
-});
-it("DP-IR-2: a fresh new-problem sheet pairs its current background and ink despite an obsolete repaint pending and failing", async () => {
-  const f = await fixture();
-  try {
-    await f.theme("light", "light"); assert.equal(f.probe.renders.length, 1); const oldId = f.state.draft!.id;
-    f.sheets.observePoses(f.state, ["new-problem"]); f.create("light", "#ffffff", "NEW PROBLEM");
-    f.sheets.setPan(f.state, { x: 17, y: -23 });
-    const fresh = f.sheets.capture(f.state)!; assert.notEqual(fresh.draft.id, oldId);
-    assert.equal(fresh.draft.backgroundColor, "#ffffff"); assert.equal(fresh.color, "#000000", "new light paper must never be published with old dark-mode white ink");
-    f.probe.renders[0]!.reject(new Error("Obsolete old-reference render failed")); await settle();
-    f.sheets.setPan(f.state, { x: 18, y: -24 }); await settle();
-    const retained = f.sheets.capture(f.state)!;
-    assert.equal(retained.draft.id, fresh.draft.id); assert.equal(retained.draft.background, "reference-light"); assert.equal(retained.color, "#000000");
-    assert.equal(retained.draft.reference!.question, "NEW PROBLEM"); assert.equal(retained.draft.strokes.length, 1);
-    assert.deepEqual(f.state.pan, { x: 18, y: -24 });
-    assert.deepEqual([retained.draft.width, retained.draft.height, retained.draft.pixelRatio], [600, 100, 1]);
-  } finally { await f.dispose(); }
-});
-it("DP-IR-3: accepted active-mode ink immediately recolors a current draft despite obsolete rendering and its failure", async () => {
-  const f = await fixture();
-  try {
-    await f.theme("light", "light"); assert.equal(f.probe.renders.length, 1);
-    f.sheets.observePoses(f.state, ["new-problem"]); f.create("light", "#ffffff", "NEW PROBLEM");
-    f.sheets.setPan(f.state, { x: 17, y: -23 });
-    const before = f.sheets.capture(f.state)!;
-    assert.equal(before.color, "#000000");
-    f.notify({ revision: 1, darkInkColor: "#ffffff", lightInkColor: "#7654ab", imageScale: 50 });
-    assert.equal(f.schema().rows[1]!.value, "#7654ab");
-    const accepted = f.sheets.capture(f.state)!;
-    assert.equal(accepted.color, "#7654ab", "accepted current-mode ink cannot wait on an obsolete reference render");
-    assert.equal(accepted.draft.color, "#7654ab"); assert.equal(accepted.draft.revision, before.draft.revision + 1);
-    assert.equal(before.color, "#000000"); assert.equal(before.draft.color, "#000000", "existing attempts remain immutable");
-    f.probe.renders[0]!.reject(new Error("Obsolete old-reference render failed")); await settle();
-    f.sheets.setPan(f.state, { x: 18, y: -24 }); await settle();
-    const retained = f.sheets.capture(f.state)!;
-    assert.equal(retained.color, "#7654ab"); assert.equal(retained.draft.backgroundColor, "#ffffff");
-    assert.equal(retained.draft.id, before.draft.id); assert.equal(retained.draft.reference!.question, "NEW PROBLEM");
-    assert.equal(retained.draft.strokes.length, 1); assert.deepEqual(f.state.pan, { x: 18, y: -24 });
-    f.sheets.accepted(before); assert.equal(f.sheets.pending(f.state), true, "accepting older black ink cannot mark newly recolored work sent");
-    const revision = retained.draft.revision;
-    f.notify({ revision: 2, darkInkColor: "#123456", lightInkColor: "#7654ab", imageScale: 50 }); await settle();
-    assert.equal(f.sheets.capture(f.state)!.color, "#7654ab"); assert.equal(f.state.draft!.revision, revision, "inactive-mode preferences do not edit the current draft");
-  } finally { await f.dispose(); }
-});
+
+function strokeOn(canvas: FakeElement, pointerType: "mouse" | "touch" | "pen", y = 100) {
+  canvas.dispatchEvent({ type: "pointerdown", pointerId: 1, pointerType, isPrimary: true, button: 0, buttons: 1, pressure: 0.7, clientX: 50, clientY: y });
+  canvas.dispatchEvent({ type: "pointermove", pointerId: 1, pointerType, isPrimary: true, buttons: 1, pressure: 0.7, clientX: 250, clientY: y });
+  canvas.dispatchEvent({ type: "pointerup", pointerId: 1, pointerType, isPrimary: true, button: 0, buttons: 0, pressure: 0, clientX: 250, clientY: y });
+}
+
+it("mounts Bild 1 controls, keeps Question collapsed initially, isolates Karoraster grid, and supports mouse/touch/pen", () =>
+  withFakeDom(async ({ rootEl, markdownCalls }) => {
+    const sheets = new Sheets(() => {}, () => {});
+    const state = sheets.session("s1", "teaching");
+    const controller = new AbortController();
+    const input = {
+      type: "answer",
+      revealed: true,
+      available: true,
+      expanded: true,
+      question: {
+        id: "q1",
+        kind: "explain",
+        question: "Find the **magnitude** of $v$.",
+        mode: "text",
+        options: [],
+        occurrence: { messageId: "m1", contentIndex: 0, toolCallId: "q1", toolName: "explain" },
+      },
+    } as unknown as PluginSessionViewInput;
+
+    const mounted = mountSheet(rootEl as unknown as HTMLElement, fakeCtx(markdownCalls), sheets, state, "q1", input, controller.signal, async () => {});
+
+    const inkCanvas = rootEl.querySelector("canvas.drawing-pad-ink")!;
+    const gridCanvas = rootEl.querySelector("canvas.drawing-pad-grid")!;
+    assert.ok(inkCanvas);
+    assert.ok(gridCanvas);
+    assert.equal(gridCanvas.hidden, true);
+
+    // Question drawer starts collapsed
+    const questionBtn = rootEl.querySelector('[aria-label="Question"]')!;
+    const drawer = rootEl.querySelector(".drawing-pad-question-drawer")!;
+    assert.equal(questionBtn.getAttribute("aria-expanded"), "false");
+    assert.equal(drawer.hidden, true);
+    questionBtn.click();
+    assert.equal(questionBtn.getAttribute("aria-expanded"), "true");
+    assert.equal(drawer.hidden, false);
+    assert.ok(markdownCalls.includes("Find the **magnitude** of $v$."));
+    questionBtn.click();
+    assert.equal(questionBtn.getAttribute("aria-expanded"), "false");
+    assert.equal(drawer.hidden, true);
+
+    // Karoraster grid renders only on gridCanvas, leaving inkCanvas bitmap unchanged
+    const blankInkUrl = inkCanvas.toDataURL("image/png");
+    const gridBtn = rootEl.querySelector('[aria-label="Karoraster grid"]')!;
+    gridBtn.click();
+    assert.equal(gridBtn.getAttribute("aria-pressed"), "true");
+    assert.equal(gridCanvas.hidden, false);
+    assert.equal(inkCanvas.toDataURL("image/png"), blankInkUrl);
+    assert.ok(gridCanvas.canvasOps.some(op => op.startsWith("stroke:")));
+
+    // DOM ordering invariant: color swatches precede Light/Dark paper theme buttons
+    const allButtons = rootEl.querySelectorAll("button");
+    const blackIdx = allButtons.findIndex(b => b.getAttribute("aria-label") === "Black ink");
+    const whiteIdx = allButtons.findIndex(b => b.getAttribute("aria-label") === "White ink");
+    const lightIdx = allButtons.findIndex(b => b.getAttribute("aria-label") === "Light");
+    const darkIdx = allButtons.findIndex(b => b.getAttribute("aria-label") === "Dark");
+    assert.ok(blackIdx >= 0 && whiteIdx >= 0 && lightIdx > whiteIdx && darkIdx > blackIdx);
+
+    // Pointer parity: mouse, touch, and pen all draw
+    for (const [idx, pType] of (["mouse", "touch", "pen"] as const).entries()) {
+      strokeOn(inkCanvas, pType, 80 + idx * 40);
+    }
+    const draft = state.drafts.get("q1")!;
+    assert.equal(draft.strokes.length, 3);
+
+    // Light paper theme + Blue ink + width 8
+    rootEl.querySelector('[aria-label="Light"]')!.click();
+    rootEl.querySelector('[aria-label="Blue ink"]')!.click();
+    const slider = rootEl.querySelector(".drawing-pad-width-slider")!;
+    slider.value = "8";
+    slider.dispatchEvent({ type: "input" });
+    strokeOn(inkCanvas, "pen", 220);
+
+    const updated = state.drafts.get("q1")!;
+    assert.equal(updated.paperTheme, "light");
+    assert.equal(updated.strokes.at(-1)!.color, "#2563eb");
+    assert.equal(updated.strokes.at(-1)!.width, 8);
+
+    // Undo / Redo + Add to answer button disabled state
+    const addBtn = rootEl.querySelector('[aria-label="Add to answer"]')!;
+    assert.equal(addBtn.disabled, false);
+
+    // Export checks solid #ffffff paper + strokes
+    const captured = sheets.capture(state, "q1")!;
+    const exported = await exportSheet(captured, controller.signal);
+    assert.equal(exported.mimeType, "image/png");
+    assert.ok(exported.data.length > 0);
+
+    // Clear removes strokes & redo & localStorage
+    rootEl.querySelector('[aria-label="Clear"]')!.click();
+    assert.equal(state.drafts.get("q1")!.strokes.length, 0);
+    assert.equal(addBtn.disabled, true);
+
+    mounted.dispose();
+  }),
+);
+
+it("keeps surface open with inline error and preserves local draft if stageSubmissionImage throws", () =>
+  withFakeDom(async ({ rootEl, storage, markdownCalls }) => {
+    const sheets = new Sheets(() => {}, () => {});
+    const state = sheets.session("s1", "teaching");
+    const controller = new AbortController();
+    const input = { type: "text" } as unknown as PluginSessionViewInput;
+
+    const mounted = mountSheet(rootEl as unknown as HTMLElement, fakeCtx(markdownCalls), sheets, state, "composer", input, controller.signal, async () => {
+      throw new Error("Network upload failed");
+    });
+
+    const inkCanvas = rootEl.querySelector("canvas.drawing-pad-ink")!;
+    strokeOn(inkCanvas, "touch", 120);
+
+    const addBtn = rootEl.querySelector('[aria-label="Add to answer"]')!;
+    addBtn.click();
+    await new Promise(resolve => setTimeout(resolve, 10));
+
+    const alert = rootEl.querySelector('[role="alert"]')!;
+    assert.equal(alert.hidden, false);
+    assert.match(alert.textContent, /Network upload failed/);
+    assert.equal(state.drafts.get("composer")!.strokes.length, 1);
+    assert.ok(storage.has(draftStorageKey("s1", "composer")));
+    assert.equal(addBtn.disabled, false);
+
+    mounted.dispose();
+  }),
+);

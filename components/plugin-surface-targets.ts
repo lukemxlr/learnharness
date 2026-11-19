@@ -1,4 +1,4 @@
-import type { PluginSurfaceTarget } from "@/src/core";
+import type { PluginStagedImageInput, PluginSurfaceTarget } from "@/src/core";
 import type { InteractionLayersController } from "./interaction-layers";
 
 /** Private, live view-instance registry. Tokens carry no serializable routing data. */
@@ -12,6 +12,7 @@ export interface SurfaceBoundary {
 }
 const boundaries = new WeakMap<PluginSurfaceTarget, SurfaceBoundary>();
 const currentPages = new WeakMap<Document, SurfaceBoundary>();
+const stagingHandlers = new WeakMap<PluginSurfaceTarget, (image: PluginStagedImageInput) => Promise<void>>();
 
 export function registerSurfaceBoundary(body: HTMLElement, signal: AbortSignal, controller: InteractionLayersController): SurfaceBoundary {
 	const target = Object.freeze({}) as PluginSurfaceTarget;
@@ -48,4 +49,22 @@ export function requireSurfaceBoundary(target: PluginSurfaceTarget | undefined):
 	const boundary = findSurfaceBoundary(target);
 	if (!boundary?.stack?.isConnected) throw new Error("Surface target is no longer active");
 	return boundary;
+}
+
+export function registerSurfaceStaging(
+	target: PluginSurfaceTarget | undefined,
+	handler: (image: PluginStagedImageInput) => Promise<void>,
+): () => void {
+	if (!target) return () => {};
+	stagingHandlers.set(target, handler);
+	return () => {
+		if (stagingHandlers.get(target) === handler) stagingHandlers.delete(target);
+	};
+}
+
+export async function stageOnSurface(target: PluginSurfaceTarget, image: PluginStagedImageInput): Promise<void> {
+	const boundary = findSurfaceBoundary(target);
+	const handler = boundary ? stagingHandlers.get(target) : undefined;
+	if (!handler) throw new Error("No active submission surface is available for staging.");
+	await handler(image);
 }

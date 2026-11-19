@@ -2,9 +2,10 @@ import type {
 	PluginAction, PluginCleanup, PluginFrontendContext, PluginFrontendModule, PluginInfo,
 	PluginNotification, PluginView, ServerEvent, PluginCodeBlockRenderer, PluginToolRenderer,
 	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration, PluginPageActionContext, PluginActionShortcut,
+	PluginStagedImageInput, PluginSurfaceTarget,
 } from "@/src/core";
 
-import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
+import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, validatePluginStagedImageInput, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
 import { orderSubmissionInterceptors, type SubmissionInterceptorRegistration } from "./plugin-submission-runner.ts";
 
 export type PluginMount = (container: HTMLElement, signal: AbortSignal) => ReturnType<PluginView["mount"]>;
@@ -77,6 +78,7 @@ export interface PluginHost {
 	openSettings?(pluginId: string): void;
 	createUi?(options: { signal: AbortSignal; pluginId?: string; onError: (error: unknown) => void }): import("@/src/core/plugin-ui").PluginUi;
 	style?(url: string, onError: () => void): PluginCleanup;
+	stageSubmissionImage?(target: PluginSurfaceTarget, image: PluginStagedImageInput): Promise<void>;
 }
 
 export function pluginViewPath(pluginId: string, viewId: string): string {
@@ -380,6 +382,12 @@ export class PluginFrontendManager {
 			},
 			refreshActions: () => { if (this.current(life)) this.publish(); },
 			refreshSubmissions: () => { if (this.current(life)) this.publish(); },
+			stageSubmissionImage: async (target, image) => {
+				if (!this.current(life)) throw new Error("Plugin is no longer active");
+				const validated = validatePluginStagedImageInput(image);
+				if (!thisManager.host.stageSubmissionImage) throw new Error("Attachment staging is unavailable");
+				await thisManager.host.stageSubmissionImage(target, validated);
+			},
 			registerSubmissionInterceptor: (definition: PluginSubmissionInterceptor) => {
 				if (!this.current(life)) return () => {};
 				const validated = preparePluginSubmissionInterceptor(definition);

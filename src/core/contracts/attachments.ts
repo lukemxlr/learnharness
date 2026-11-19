@@ -22,6 +22,8 @@ export const ATTACHMENT_MIME_TYPES = [
 export type AttachmentMimeType = (typeof ATTACHMENT_MIME_TYPES)[number];
 export type AttachmentKind = "image" | "pdf";
 
+export const ATTACHMENT_INPUT_ACCEPT = "image/*,application/pdf" as const;
+
 // Aligned with lib/notes-import-limits.ts (25 MiB max file, 26 MiB multipart ceiling).
 export const MAX_ATTACHMENT_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_ATTACHMENT_PDF_BYTES = 25 * 1024 * 1024;
@@ -143,6 +145,17 @@ export function parseAttachmentRef(raw: unknown): AttachmentRef {
 		kind,
 		url: expectedUrl,
 	};
+}
+
+export function parseAttachmentRefArray(raw: unknown, allowedKinds?: readonly AttachmentKind[]): AttachmentRef[] {
+	if (!Array.isArray(raw)) throw new Error("Attachments must be an array");
+	return raw.map((item) => {
+		const ref = parseAttachmentRef(item);
+		if (allowedKinds && !allowedKinds.includes(ref.kind)) {
+			throw new Error(`Attachment kind "${ref.kind}" is not allowed here`);
+		}
+		return ref;
+	});
 }
 
 export function parseAttachmentMetaRecord(raw: unknown): AttachmentMetaRecord {

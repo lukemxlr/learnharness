@@ -45,7 +45,7 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 	Object.defineProperty(dom.window.HTMLElement.prototype, "clientWidth", { configurable: true, get() { return width; } });
 	Object.defineProperty(dom.window.HTMLElement.prototype, "scrollWidth", { configurable: true, get() { return this.hasAttribute("data-plugin-chrome-title") ? 200 : 80; } });
 	dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
-		const w = this.className.includes("h-9") ? 80 : 36;
+		const w = this.className.includes("h-9") || this.className.includes("min-h-11") ? 80 : 36;
 		return { top: 0, bottom: 36, left: 0, right: w, width: w, height: 36, x: 0, y: 0, toJSON() {} };
 	};
 	const restorePreparedDom = prepareDom?.(dom);

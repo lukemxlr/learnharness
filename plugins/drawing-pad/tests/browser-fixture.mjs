@@ -91,6 +91,7 @@ const ctx = {
   registerAction(value) { action = value; refresh(); return () => { action = undefined; topButton.textContent = "Disabled"; }; },
   placeAction(value) { window.fixture.placement = value; return () => {}; },
   refreshActions: refresh, refreshSubmissions() {},
+  async stageSubmissionImage(_target, image) { window.fixture.stagedImages.push(image); },
   registerSubmissionInterceptor(value) { interceptor = value; return () => { interceptor = undefined; }; },
   registerSettings(schema) { updateSettings(schema); return { update(next) { updateSettings(next); }, dispose() { settingsSchema = undefined; } }; },
   async call(name, value) {
@@ -199,7 +200,7 @@ function submissionFor() {
   return { type: "text", content: { text: "message", images: [] } };
 }
 window.fixture = {
-  errors, calls, attempts, markdownLog, mathSeen: false, diagramSeen: false, holdMarkdown: false, placement: undefined, failSetting: false, failLifecycle: false,
+  errors, calls, attempts, stagedImages: [], markdownLog, mathSeen: false, diagramSeen: false, holdMarkdown: false, placement: undefined, failSetting: false, failLifecycle: false,
   releaseMarkdown() { for (const render of heldMarkdown.splice(0)) render(); },
   pendingMarkdown() { return heldMarkdown.length; },
   holdPoseReads: false,

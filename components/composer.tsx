@@ -3,8 +3,10 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { AttachmentRef } from "@/src/core";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { extractPastedAttachmentFiles, StagedAttachments } from "@/components/attachment-staging";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 
@@ -61,6 +63,12 @@ export function ChatSessionComposer({
 	nextProblem,
 	onNext,
 	pendingInput = false,
+	attachments = [],
+	uploading = false,
+	uploadError = null,
+	onUploadFiles,
+	onRemoveAttachment,
+	onDismissUploadError,
 }: {
 	busy: boolean;
 	value: string;
@@ -77,10 +85,16 @@ export function ChatSessionComposer({
 	nextProblem?: boolean;
 	onNext?: () => void;
 	pendingInput?: boolean;
+	attachments?: readonly AttachmentRef[];
+	uploading?: boolean;
+	uploadError?: string | null;
+	onUploadFiles?: (files: File[]) => void;
+	onRemoveAttachment?: (id: string, index: number) => void;
+	onDismissUploadError?: () => void;
 }) {
 	const [draft, setDraft] = useState(value);
 	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
-	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive || pendingInput);
+	const canSend = sendAllowed && !uploading && (draft.trim().length > 0 || dictationActive || pendingInput || attachments.length > 0);
 	const applyDraft = useCallback((next: string) => {
 		setDraft(next);
 		onChange(next);
@@ -100,6 +114,12 @@ export function ChatSessionComposer({
 			placeholder={placeholder}
 			nextProblem={nextProblem}
 			onNext={onNext}
+			attachments={attachments}
+			uploading={uploading}
+			uploadError={uploadError}
+			onUploadFiles={onUploadFiles}
+			onRemoveAttachment={onRemoveAttachment}
+			onDismissUploadError={onDismissUploadError}
 		/>
 	);
 }
@@ -119,6 +139,12 @@ export function Composer({
 	onNext,
 	defaultDropTarget = true,
 	fileInsertion = true,
+	attachments = [],
+	uploading = false,
+	uploadError = null,
+	onUploadFiles,
+	onRemoveAttachment,
+	onDismissUploadError,
 }: {
 	busy: boolean;
 	value: string;
@@ -147,9 +173,16 @@ export function Composer({
 	/** Neutral plugin composers opt out without changing core defaults. */
 	defaultDropTarget?: boolean;
 	fileInsertion?: boolean;
+	attachments?: readonly AttachmentRef[];
+	uploading?: boolean;
+	uploadError?: string | null;
+	onUploadFiles?: (files: File[]) => void;
+	onRemoveAttachment?: (id: string, index: number) => void;
+	onDismissUploadError?: () => void;
 }) {
 	const controller = useOptionalInteractionLayers();
 	const act = () => {
+		if (uploading && !busy) return;
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
 		else if (action === "send") onSend();
@@ -157,21 +190,40 @@ export function Composer({
 	};
 	const ownInputRef = useRef<HTMLDivElement>(null);
 	const editorRef = inputRef ?? ownInputRef;
+	const handlePasteFiles = onUploadFiles ? (files: File[]) => { onUploadFiles(files); } : undefined;
 	return (
 		<form
 			data-testid="composer"
-			className="flex items-end gap-1.5 p-1.5"
+			className="flex flex-col p-1.5"
 			onSubmit={(e) => {
 				e.preventDefault();
 				act();
 			}}
+			onPaste={(e) => {
+				if (!onUploadFiles || e.defaultPrevented) return;
+				if (e.target instanceof Element && e.target.closest("[data-file-path-input]")) return;
+				const files = extractPastedAttachmentFiles(e.clipboardData);
+				if (files.length > 0) {
+					e.preventDefault();
+					onUploadFiles(files);
+				}
+			}}
 		>
+			<StagedAttachments
+				attachments={attachments}
+				uploadingCount={uploading ? 1 : 0}
+				error={uploadError}
+				onRemove={onRemoveAttachment}
+				onDismissError={onDismissUploadError}
+			/>
+			<div className="flex items-end gap-1.5">
 			<PathInput
 				ref={editorRef}
 				value={value}
 				onValueChange={onChange}
 				defaultDropTarget={defaultDropTarget}
 				fileInsertion={fileInsertion}
+				onPasteFiles={handlePasteFiles}
 				onKeyDown={(e) => {
 					if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 					// Esc ends dictation before anything else Esc might someday mean
@@ -197,7 +249,7 @@ export function Composer({
 				autoFocus={autoFocus}
 				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 			/>
-			<AttachFilesButton editorRef={editorRef} />
+			<AttachFilesButton editorRef={editorRef} onUploadFiles={onUploadFiles} disabled={uploading} />
 			{/* The button follows the text (owner report 2026-10-03): while
 				 a turn runs WITH text typed it stays the SEND affordance
 				 (click = steer — steering must be clickable, not Enter-only);
@@ -212,7 +264,7 @@ export function Composer({
 				 (click and Enter share one lane), and typing anything
 				 returns the regular send. The green is the app's correct-
 				 answer register (answered-card's success token). */}
-				{nextProblem && !busy && !canSend ? (
+				{nextProblem && !busy && !canSend && !uploading ? (
 					<button
 						type="submit"
 						data-testid="next-problem-button"
@@ -226,7 +278,7 @@ export function Composer({
 					<button
 						type="submit"
 						aria-label={busy && !canSend ? "Stop" : "Send"}
-						disabled={!busy && !canSend}
+						disabled={(!busy && !canSend) || (!busy && uploading)}
 						className={cn(
 							"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors",
 							busy && !canSend
@@ -237,6 +289,7 @@ export function Composer({
 						{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
 					</button>
 				)}
+			</div>
 		</form>
 	);
 }

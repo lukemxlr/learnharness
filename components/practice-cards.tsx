@@ -2,7 +2,7 @@
 
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { StatusBadge } from "@/components/ui/status-badge";
-import type { ArtifactPartProps } from "@/src/core";
+import type { ArtifactPartProps, AttachmentRef } from "@/src/core";
 
 /**
  * The practice transcript cards (practice sessions, owner design
@@ -56,6 +56,7 @@ export interface PracticeThinkingData {
 	commit?: boolean;
 	text: string;
 	images?: readonly Readonly<import("@earendil-works/pi-ai").ImageContent>[];
+	attachments?: readonly AttachmentRef[];
 }
 
 export function ProblemCard({ part }: ArtifactPartProps) {
@@ -296,5 +297,5 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} images={data.images} defaultOpen />;
+	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} images={data.images} attachments={data.attachments} defaultOpen />;
 }

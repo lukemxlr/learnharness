@@ -2,7 +2,8 @@
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { ViewReaderRef } from "./session-view-readers";
-import { ChevronRightIcon } from "lucide-react";
+import { ChevronRightIcon, ImagePlusIcon } from "lucide-react";
+import { ATTACHMENT_INPUT_ACCEPT, type AttachmentRef } from "@/src/core";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
@@ -10,6 +11,7 @@ import { useEnterSubmits } from "@/components/enter-submits";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
+import { extractPastedAttachmentFiles, StagedAttachments } from "@/components/attachment-staging";
 import type { PrepareThinkingSubmission } from "./plugin-submission-adapters";
 import { cn } from "@/lib/utils";
 
@@ -63,11 +65,21 @@ export interface PracticeDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	attachments?: readonly AttachmentRef[];
+	uploading?: boolean;
+	uploadError?: string | null;
+	onUploadFiles?: (files: File[]) => void;
+	onRemoveAttachment?: (id: string, index: number) => void;
+	onDismissUploadError?: () => void;
 }
 
-export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false, attachments = [], uploading = false, uploadError = null, onUploadFiles, onRemoveAttachment, onDismissUploadError }: PracticeDockProps) {
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLElement>(null);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const hasAttachments = attachments.length > 0;
+	const hasAttachmentsRef = useRef(hasAttachments);
+	hasAttachmentsRef.current = hasAttachments;
 	const [nativeThinking, setNativeThinking] = useState("");
 	const custom = useRef(customInput); custom.current = customInput;
 	const thinking = customInput ? customInput.thinking : nativeThinking;
@@ -98,10 +110,10 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 
 	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, thinking]);
 	const submit = () => {
-		if (compactionRunning || preparing) return;
+		if (compactionRunning || preparing || uploading) return;
 		const prepare = customInput?.prepare ?? onPrepareSubmission;
 		if (prepare) {
-			if (customInput ? !customInput.ready : (!thinkingRef.current.trim() && !hasPendingInput)) return;
+			if (customInput ? !customInput.ready : (!thinkingRef.current.trim() && !hasPendingInput && !hasAttachmentsRef.current)) return;
 			let capturedRevision = editRevision.current;
 			prepare(() => { capturedRevision = editRevision.current; return customInput ? thinkingRef.current : thinkingRef.current.trim(); }, captured => {
 				if (editRevision.current === capturedRevision && (customInput ? thinkingRef.current : thinkingRef.current.trim()) === captured) { thinkingRef.current = ""; setThinking(""); }
@@ -109,7 +121,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 			return;
 		}
 		const text = thinkingRef.current.trim();
-		if (text.length === 0) return;
+		if (text.length === 0 && !hasAttachmentsRef.current) return;
 		thinkingRef.current = "";
 		setThinking("");
 		onSubmit(text);
@@ -137,9 +149,24 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 		);
 	if (!expanded && !customInput) return bar;
 
+	const handlePasteFiles = onUploadFiles ? (files: File[]) => { onUploadFiles(files); } : undefined;
+
 	/* ── the expanded form ── */
 	return (
-		<div ref={element => { rootRef.current = element; }} data-testid="practice-dock" data-problem={problemCallId}>
+		<div
+			ref={element => { rootRef.current = element; }}
+			data-testid="practice-dock"
+			data-problem={problemCallId}
+			onPaste={(e) => {
+				if (!onUploadFiles || e.defaultPrevented) return;
+				if (e.target instanceof Element && e.target.closest("[data-file-path-input]")) return;
+				const files = extractPastedAttachmentFiles(e.clipboardData);
+				if (files.length > 0) {
+					e.preventDefault();
+					onUploadFiles(files);
+				}
+			}}
+		>
 			{!expanded && bar}
 			<div hidden={!expanded}>
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
@@ -166,6 +193,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 				</div>
 				<PathInput
 					value={thinking}
+					onPasteFiles={handlePasteFiles}
 					onValueChange={(value) => {
 						thinkingRef.current = value; editRevision.current++;
 						setThinking(value);
@@ -193,20 +221,51 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 						"field-sizing-content lh-input max-h-64 min-h-16 w-full resize-none bg-transparent px-2.5 pb-2 outline-none placeholder:text-muted-foreground",
 					)}
 				/>
+				<StagedAttachments
+					attachments={attachments}
+					uploadingCount={uploading ? 1 : 0}
+					error={uploadError}
+					onRemove={onRemoveAttachment}
+					onDismissError={onDismissUploadError}
+					className="px-2 pt-1 pb-1"
+				/>
 				{/* The submit row (owner round 4, 2026-10-05): IDENTICAL to the
 				    question dock's — hint left, the SAME Button (h-9, px-3.5),
 				    one p-1 row. Corner radii concentric: shell 16 − m-1.5 (6) =
 				    field 10 − p-1 (4) = button 6. */}
 				<div className="flex items-center justify-between gap-2 p-1">
-					<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
+					<input
+						ref={fileInputRef}
+						type="file"
+						accept={ATTACHMENT_INPUT_ACCEPT}
+						multiple
+						hidden
+						data-testid="practice-attach-input"
+						onChange={(e) => {
+							const files = Array.from(e.currentTarget.files ?? []);
+							e.currentTarget.value = "";
+							if (files.length > 0) onUploadFiles?.(files);
+						}}
+					/>
+					<button
+						type="button"
+						aria-label="Attach image or PDF"
+						data-testid="practice-attach-button"
+						disabled={uploading || !onUploadFiles}
+						onClick={() => fileInputRef.current?.click()}
+						className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-[6px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+					>
+						<ImagePlusIcon className="size-4" />
+					</button>
+					<span aria-hidden className="pl-1 text-xs text-muted-foreground">
 						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
 					</span>
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={(customInput ? !customInput.ready : (!thinking.trim() && !hasPendingInput)) || compactionRunning || preparing}
+						disabled={(customInput ? !customInput.ready : (!thinking.trim() && !hasPendingInput && !hasAttachments)) || compactionRunning || preparing || uploading}
 						onClick={() => submit()}
-						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+						className="ml-auto min-h-11 h-11 rounded-[6px] px-3.5 text-sm font-medium"
 					>
 						{customInput ? "Submit" : "Submit thinking"}
 					</Button>

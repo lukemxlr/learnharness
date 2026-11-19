@@ -271,6 +271,15 @@ export interface PluginToolRenderer {
 	 * Presentation alone does not create pending learner input or run a tool. */
 	mount(container: HTMLElement, tool: PluginToolRenderProps): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
+/** Image payload staged by a frontend plugin onto the active submission surface's preview tray. */
+export interface PluginStagedImageInput {
+	/** Image MIME type (PNG, JPEG, WebP, or GIF). */
+	readonly mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+	/** Canonical base64-encoded image bytes without a data URL prefix. */
+	readonly data: string;
+	/** Optional display filename for the staged attachment preview. */
+	readonly filename?: string;
+}
 /** Frontend activation scope, once per enabled plugin per window. Registrations,
  * subscriptions and UI expire with this activation; backend work is server-owned. */
 export interface PluginFrontendContext {
@@ -299,6 +308,8 @@ export interface PluginFrontendContext {
 	registerSubmissionInterceptor(definition: PluginSubmissionInterceptor): () => void;
 	/** Notify the host when plugin-owned pending submission input changes. */
 	refreshSubmissions(): void;
+	/** Stage an image into the active submission target's attachment preview tray on the supplied surface without submitting a turn. */
+	stageSubmissionImage(target: import("./plugin-ui.ts").PluginSurfaceTarget, image: PluginStagedImageInput): Promise<void>;
 	/** Register a lazy settings-body mount; returns unregister. Only one settings
 	 * registration is allowed per activation. Mount signal scopes its child UI. */
 	registerSettings(mount: PluginView["mount"]): () => void;

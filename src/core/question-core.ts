@@ -20,6 +20,7 @@
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
 import { expandCitationsForModel } from "./citations.ts";
+import type { AttachmentRef } from "./contracts/attachments.ts";
 import type { PluginSubmissionImages } from "./plugin-submissions.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
@@ -466,6 +467,8 @@ export interface QuestionAnswerData {
 	readingThinking?: string;
 	/** Host-owned explicit image channels; never inferred from text or paths. */
 	images?: PluginSubmissionImages;
+	/** Persisted attachment references (images) for this answer. */
+	attachments?: AttachmentRef[];
 	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01)
 	correct?: boolean; // quiz only
 	correctIndices?: number[]; // quiz only (rendering)
@@ -493,6 +496,7 @@ export interface AnswerRequest {
 	text?: string; // ask text-mode
 	thinking?: string; // the reasoning-on-the-question channel (was `note`)
 	readingThinking?: string; // the thinking-while-reading channel (check answers)
+	attachments?: AttachmentRef[];
 	confidence?: number; // quiz only: 0-100 raw probability — 50 is a real coin flip, always sent (owner, 2026-10-01)
 }
 
@@ -523,6 +527,7 @@ export interface QuestionFormDraft {
 	other: string;
 	text: string;
 	confidenceIndex: number;
+	attachments?: AttachmentRef[];
 }
 
 export interface QuestionDraft {
@@ -720,6 +725,7 @@ export function buildAnswer(qd: QuestionData, req: AnswerRequest, tool?: string)
 		answers: [],
 		thinking: req.thinking?.trim() || undefined,
 		readingThinking: req.readingThinking?.trim() || undefined,
+		...(req.attachments?.length ? { attachments: req.attachments.map((a) => ({ ...a })) } : {}),
 		answeredAt: new Date().toISOString(),
 	};
 	// resolve selected option values → OptionAnswer (in display order)

@@ -1,28 +1,423 @@
 .drawing-pad-root {
-  position: absolute; inset: 0;
-  overflow: hidden; background: var(--background); color: var(--foreground);
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: contain;
 }
-.drawing-pad-tools {
-  position: absolute; top: 0; left: 0; z-index: 1;
-  display: flex; width: max-content; max-width: calc(100% - 52px); gap: 6px; align-items: center;
-  min-height: 48px; padding: 8px 12px; overflow-x: auto; pointer-events: none;
+
+.drawing-pad-topbar {
+  order: 1;
+  flex: 0 0 auto;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 54px;
+  padding: 5px 52px 5px 10px;
+  background: #141414;
+  color: #f8fafc;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  box-sizing: border-box;
+  max-width: 100%;
 }
-.drawing-pad-tools > span { flex: 0 0 auto; pointer-events: auto; }
-.drawing-pad-viewport { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
-.drawing-pad-paper { position: absolute; inset: 0; overflow: hidden; }
-.drawing-pad-background { position: absolute; max-width: none; max-height: none; pointer-events: none; user-select: none; }
-.drawing-pad-background[hidden] { display: none; }
-.drawing-pad-ink { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; user-select: none; cursor: default; }
-.drawing-pad-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; font-size: 13px; }
-.drawing-pad-status[hidden], .drawing-pad-paper[hidden] { display: none; }
-/* Native dock: 46rem column - 2rem outer padding - 2px shell borders
-   - 2rem question padding. Match its normal content width, never the window. */
-.drawing-pad-reference { position: absolute; left: -100000px; top: 0; width: calc(42rem - 2px); box-sizing: border-box; color: inherit; }
-.drawing-pad-reference-label { margin-bottom: 4px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .025em; color: var(--muted-foreground); }
-.drawing-pad-reference-question { margin-bottom: 12px; font-weight: 500; }
-.drawing-pad-reference-context { margin-bottom: 12px; font-size: 13px; color: var(--muted-foreground); }
-.drawing-pad-reference-option { display: flex; align-items: flex-start; gap: 12px; border: 1px solid var(--border); border-radius: 8px; margin-top: 8px; padding: 8px 12px; font-size: 13px; }
-.drawing-pad-reference-mark { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; border: 1px solid var(--muted-foreground); border-radius: 50%; box-sizing: border-box; }
-.drawing-pad-reference-mark[data-multiple="true"] { border-radius: 2px; }
-.drawing-pad-reference-description { font-size: 11px; color: var(--muted-foreground); }
-.drawing-pad-reference-extra { border-style: dashed; color: var(--muted-foreground); }
+
+.drawing-pad-topbar-left,
+.drawing-pad-topbar-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.drawing-pad-top-btn,
+.drawing-pad-theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.drawing-pad-top-btn svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.drawing-pad-top-btn:hover,
+.drawing-pad-theme-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.drawing-pad-top-btn[aria-expanded="true"],
+.drawing-pad-top-btn[aria-pressed="true"],
+.drawing-pad-theme-btn[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.24);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #ffffff;
+}
+
+.drawing-pad-theme-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.drawing-pad-theme-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 12px;
+}
+
+.drawing-pad-submit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 9999px;
+  border: 1px solid #ffffff;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.drawing-pad-submit-btn:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.drawing-pad-submit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.drawing-pad-error {
+  order: 2;
+  flex: 0 0 auto;
+  z-index: 18;
+  padding: 8px 14px;
+  background: #7f1d1d;
+  color: #fef2f2;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(254, 202, 202, 0.3);
+}
+
+.drawing-pad-error[hidden] {
+  display: none;
+}
+
+.drawing-pad-question-drawer {
+  order: 3;
+  flex: 0 0 auto;
+  z-index: 15;
+  max-height: 32vh;
+  overflow-y: auto;
+  background: var(--card, #1c1c1c);
+  color: var(--foreground, #f8fafc);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  touch-action: pan-y;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.drawing-pad-question-drawer[hidden] {
+  display: none;
+}
+
+.drawing-pad-question-inner {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.drawing-pad-question-empty {
+  color: var(--muted-foreground, #94a3b8);
+  font-size: 13px;
+}
+
+.drawing-pad-viewport {
+  order: 4;
+  flex: 1 1 0%;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: contain;
+}
+
+.drawing-pad-ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drawing-pad-grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drawing-pad-grid[hidden] {
+  display: none;
+}
+
+.drawing-pad-pill-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  padding: 0 12px;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.drawing-pad-pill {
+  pointer-events: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  padding: 4px 10px;
+  border-radius: 26px;
+  background: rgba(248, 250, 252, 0.96);
+  color: #111827;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+  box-sizing: border-box;
+}
+
+.drawing-pad-pill-sep {
+  width: 1px;
+  height: 24px;
+  background: rgba(15, 23, 42, 0.16);
+  margin: 0 2px;
+  flex: 0 0 auto;
+}
+
+.drawing-pad-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: transparent;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.drawing-pad-tool-btn svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.drawing-pad-tool-btn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.drawing-pad-tool-btn[aria-pressed="true"] {
+  background: #111827;
+  color: #ffffff;
+}
+
+.drawing-pad-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.drawing-pad-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.drawing-pad-swatch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.drawing-pad-swatch-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(15, 23, 42, 0.25);
+  box-sizing: border-box;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.drawing-pad-swatch[aria-pressed="true"] .drawing-pad-swatch-dot {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #111827;
+}
+
+.drawing-pad-width-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  flex: 0 0 auto;
+}
+
+.drawing-pad-width-slider {
+  width: 72px;
+  min-height: 44px;
+  margin: 0;
+  accent-color: #111827;
+  cursor: pointer;
+}
+
+.drawing-pad-width-value {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 30px;
+  color: #334155;
+}
+
+.drawing-pad-reference-label {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  color: var(--muted-foreground);
+}
+
+.drawing-pad-reference-question {
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.drawing-pad-reference-context {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.drawing-pad-reference-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.drawing-pad-reference-mark {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1px solid var(--muted-foreground);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.drawing-pad-reference-mark[data-multiple="true"] {
+  border-radius: 2px;
+}
+
+.drawing-pad-reference-description {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.drawing-pad-reference-extra {
+  border-style: dashed;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 640px) {
+  .drawing-pad-topbar {
+    padding: 5px 46px 5px 8px;
+  }
+
+  .drawing-pad-btn-label {
+    display: none;
+  }
+
+  .drawing-pad-pill-sep {
+    display: none;
+  }
+
+  .drawing-pad-width-slider {
+    width: 60px;
+  }
+}

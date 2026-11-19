@@ -18,6 +18,7 @@ import type { ModelRole } from "../../config.ts";
 import {
 	deliverJobResult,
 	noteSteersDurable,
+	pendingUserSteerMessages,
 	reconcileUserSteers,
 	registerLiveAgent,
 	restoreUncommittedAutomatic,
@@ -63,7 +64,8 @@ import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
-import { asAgentMessages, needsContinuation, pendingProblemDismissalOf, type LhMessage } from "../core/native-messages.ts";
+import { asAgentMessages, needsContinuation, pendingProblemDismissalOf, toLlmMessages, type LhMessage } from "../core/native-messages.ts";
+import { clearLiveTurnAttachments, hydrateMessagesSync, resolveTurnAttachments, setLiveTurnAttachments } from "./attachment-delivery.ts";
 import { QUESTION_TOOLS } from "../core/pending.ts";
 import {
 	ChatInputError,
@@ -363,11 +365,24 @@ export async function handleChatInput(
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;
 	}
+	let resolvedAttachments = await resolveTurnAttachments(
+		[...record.messages, ...pendingUserSteerMessages(chatId)],
+		input,
+		conversationEngine,
+	).catch((err) => {
+		if (err instanceof ChatInputError) return err;
+		throw err;
+	});
+	if (resolvedAttachments instanceof ChatInputError) {
+		return Response.json({ error: resolvedAttachments.message }, { status: 400 });
+	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	const contextWindow = catalogContextLimits().get(modelIdForCompaction);
 	const thresholdTokens = effectiveThresholdTokens(effective.compaction?.thresholdTokens, contextWindow);
 	const systemPromptTokens = Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4);
 	const estimateModel = effective.compaction.includeReasoning ? conversationEngine.model : undefined;
+	const hydrateForEstimate = (messages: readonly LhMessage[]) =>
+		hydrateMessagesSync(asAgentMessages(messages), resolvedAttachments) as unknown as readonly LhMessage[];
 	const fitsSideContext = (messages: readonly LhMessage[]) => {
 		const live = messages.filter((message) => (message as { role: string }).role !== "system");
 		// Hard admission is not the compaction trigger. CLI capacity comes from
@@ -381,7 +396,7 @@ export async function handleChatInput(
 		const reportHistory = saved.length ? [...saved, ...live.filter((message) => !savedIds.has(message.id))] : live;
 		const window = sideContextWindow(reportHistory, conversationEngine.model, contextWindow, input.type === "retry");
 		const budget = window === undefined ? thresholdTokens : Math.max(1, window - Math.min(COMPACTION_RESERVE_TOKENS, conversationEngine.model.maxTokens));
-		return projectedContextTokens(live, systemPromptTokens, estimateModel) <= budget;
+		return projectedContextTokens(hydrateForEstimate(live), systemPromptTokens, estimateModel) <= budget;
 	};
 	const sideBudgetError = () => new Error(SIDE_CONTEXT_BUDGET_ERROR);
 	const beforeCompaction = record.messages;
@@ -403,26 +418,26 @@ export async function handleChatInput(
 						// plugin callback. The exact assembled request is checked later.
 						if (input.type === "plugin-question-answer") {
 							const pending = pendingPluginQuestionOf(current.messages);
-							if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence)) return current.messages;
+							if (!pending || pending.questionId !== input.questionId || !samePluginQuestionOccurrence(pending.occurrence, input.occurrence)) return hydrateForEstimate(current.messages);
 							if (questionCallsOf(current.messages).length || pluginQuestionCallsOf(current.messages).some(call =>
-								(call.status === "answerable" || call.status === "unreadable") && !samePluginQuestionOccurrence(call.occurrence, pending.occurrence))) return current.messages;
+								(call.status === "answerable" || call.status === "unreadable") && !samePluginQuestionOccurrence(call.occurrence, pending.occurrence))) return hydrateForEstimate(current.messages);
 						} else {
 							requirePluginProblemTarget(current, input);
-							if (hasUnresolvedQuestion(current.messages)) return current.messages;
+							if (hasUnresolvedQuestion(current.messages)) return hydrateForEstimate(current.messages);
 						}
 						const updates = sideConversationEntries({ messages: current.messages, sideChats: sideContext.snapshot(chatId) });
-						return updates.length ? [...current.messages, ...updates] : current.messages;
+						return hydrateForEstimate(updates.length ? [...current.messages, ...updates] : current.messages);
 					}
 					const next = input.type === "steers" ? input.steers.filter((entry) => !steerDelivered(current.messages, entry.id)) : inputAppends(current, input);
 					const after = [...current.messages, ...next];
-					if (hasUnresolvedQuestion(after)) return current.messages;
+					if (hasUnresolvedQuestion(after)) return hydrateForEstimate(current.messages);
 					const updates = sideConversationEntries({ messages: current.messages, sideChats: sideContext.snapshot(chatId) }, after);
-					if (!updates.length) return current.messages;
+					if (!updates.length) return hydrateForEstimate(after);
 					const projected = [...current.messages, ...(input.type === "answer" || input.type === "retry-question" ? [...next, ...updates] : [...updates, ...next])];
 					const omitted = input.type === "retry" ? retryDrops(current.messages) : new Set<string>();
-					return projected.filter((message) => !omitted.has(message.id));
+					return hydrateForEstimate(projected.filter((message) => !omitted.has(message.id)));
 				} catch (error) {
-					if (error instanceof ChatInputError) return current.messages; // normal input validation follows the gate
+					if (error instanceof ChatInputError) return hydrateForEstimate(current.messages); // normal input validation follows the gate
 					throw error;
 				}
 			},
@@ -689,6 +704,7 @@ export async function handleChatInput(
 		callPurpose,
 		requestCycle,
 		messages: asAgentMessages(agentMessages),
+		convertToLlm: (messages) => toLlmMessages(hydrateMessagesSync(messages, resolvedAttachments)),
 		validateContext: (messages) => {
 			// This is the SDK's ACTUAL request, after both prepared references
 			// and already-drained steering have joined it. A pre-queue estimate
@@ -817,6 +833,7 @@ export async function handleChatInput(
 		// run's first LLM call (the native replacement for continuation
 		// coalescing). Settlement still cannot beat the flow below: it needs
 		// a streamed response, which never happens inside the constructor.
+		setLiveTurnAttachments(chatId, engine, resolvedAttachments);
 		registerLiveAgent(chatId, constructed, input.type !== "steers" && input.type !== "continue",
 			input.type === "steers" ? new Set(appends.map((message) => message.id)) : undefined);
 		// Debug recorder run marker (owner, 2026-10-04): correlates the
@@ -860,7 +877,7 @@ export async function handleChatInput(
 				rememberTurnFailure(chatId, reportedErrorText ?? settlementErrorText(error));
 				try { applyParkedDismissal(stores.chatStore, chatId); }
 				catch (dismissalError) { console.error(`[chat ${chatId}] parked dismissal failed:`, dismissalError); }
-				finally { releaseOwnership(); unregisterLiveAgent(chatId); }
+				finally { releaseOwnership(); unregisterLiveAgent(chatId); clearLiveTurnAttachments(chatId, resolvedAttachments); }
 				// The canonical save may have succeeded before later bookkeeping
 				// threw. Reconcile against actual durability, never replay input
 				// merely because usage/extraction/other settlement work failed.
@@ -919,6 +936,7 @@ export async function handleChatInput(
 				// resolve; stranded markers return to pending), then let
 				// the pump take any stragglers down the idle wake.
 				unregisterLiveAgent(chatId);
+				clearLiveTurnAttachments(chatId, resolvedAttachments);
 				settleSteers(chatId, stamped, false, constructed);
 				// Composer steers (2026-10-03): delivered ids dropped, stranded
 				// ones stay parked for the chat's next run (the registry is the
@@ -1010,7 +1028,10 @@ export async function handleChatInput(
 				if (!preparation || preparation.isCurrent()) applyParkedDismissal(stores.chatStore, chatId);
 			} catch (err) { console.error(`[chat ${chatId}] parked dismissal failed:`, err); }
 			finally {
-				if (!preparation || preparation.isCurrent()) unregisterLiveAgent(chatId);
+				if (!preparation || preparation.isCurrent()) {
+					unregisterLiveAgent(chatId);
+					clearLiveTurnAttachments(chatId, resolvedAttachments);
+				}
 				releaseOwnership();
 			}
 		}

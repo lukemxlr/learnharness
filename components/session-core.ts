@@ -192,8 +192,14 @@ export function absorbed(m: LhMessage, record: readonly LhMessage[]): boolean {
 	const role = (m as { role?: string }).role;
 	if (role === "user") {
 		const content = (m as { content?: unknown }).content;
+		const attachments = (m as { attachments?: unknown }).attachments;
 		return record.some(
-			(r) => (r as { role?: string }).role === "user" && (Array.isArray(content) ? sameDetails((r as { content?: unknown }).content, content) : (r as { content?: unknown }).content === content),
+			(r) =>
+				(r as { role?: string }).role === "user" &&
+				(Array.isArray(content)
+					? sameDetails((r as { content?: unknown }).content, content)
+					: (r as { content?: unknown }).content === content) &&
+				sameDetails((r as { attachments?: unknown }).attachments ?? null, attachments ?? null),
 		);
 	}
 	if (role === "toolResult") {
@@ -956,12 +962,12 @@ export class SessionModel {
 		// write-ahead will persist (inputAppends), with LOCAL ids so
 		// adoption can tell them from the record's absorbed copies.
 		const optimistic: LhMessage[] = [];
-		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text, input.images), id: localId() });
+		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text, input.images, input.attachments), id: localId() });
 		else if (input.type === "thinking") {
 			// The practice submissions (2026-10-04): the marker lands
 			// optimistically — the card renders from its details the
 			// moment the button fires.
-			optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text, input.images), id: localId() });
+			optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text, input.images, input.attachments), id: localId() });
 		} else if (input.type === "next") {
 			// The move-on signal (owner round 16): the NEXT PROBLEM line
 			// renders the instant the chip/Enter fires.
@@ -1093,11 +1099,17 @@ export class SessionModel {
 	 *  settled mid-send (the race): fall back to the plain text send —
 	 *  the entry is dropped and send() pushes its own optimistic card.
 	 */
-	async steer(text: string, images?: import("../src/core/plugin-submissions.ts").PluginSubmissionContent["images"], onAccepted?: () => void, onDeliverySettled?: () => void): Promise<boolean> {
+	async steer(
+		text: string,
+		images?: import("../src/core/plugin-submissions.ts").PluginSubmissionContent["images"],
+		onAccepted?: () => void,
+		onDeliverySettled?: () => void,
+		attachments?: readonly import("../src/core/contracts/attachments.ts").AttachmentRef[],
+	): Promise<boolean> {
 		let deliverySettled = false;
 		const settleDelivery = () => { if (!deliverySettled) { deliverySettled = true; onDeliverySettled?.(); } };
 		const t = text.trim();
-		if (!t && !images?.length) { settleDelivery(); return false; }
+		if (!t && !images?.length && !attachments?.length) { settleDelivery(); return false; }
 		this.invalidateCanonicalReads();
 		const id = `steer_${localId()}`;
 		this.steerQueueValue = [...this.steerQueueValue, { id, text: t }];
@@ -1110,12 +1122,30 @@ export class SessionModel {
 			const res = await this.fetch(`/api/chats/${this.chatId}/steer`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ input: { type: "steer", id, text: t, ...(images?.length ? { images } : {}) } }),
+				body: JSON.stringify({
+					input: {
+						type: "steer",
+						id,
+						text: t,
+						...(images?.length ? { images } : {}),
+						...(attachments?.length ? { attachments: attachments.map(a => ({ ...a })) } : {}),
+					},
+				}),
 			});
 			if (res.ok) { this.invalidateCanonicalReads(); onAccepted?.(); settleDelivery(); await res.text().catch(() => {}); return true; } // parked or delivered — the stream lands the card
 			if (res.status === 409) {
 				dropSteer();
-				return await this.send({ type: "text", text: t, ...(images?.length ? { images: images.map(image => ({ ...image })) } : {}) }, onAccepted, undefined, settleDelivery); // reuse the prepared payload
+				return await this.send(
+					{
+						type: "text",
+						text: t,
+						...(images?.length ? { images: images.map(image => ({ ...image })) } : {}),
+						...(attachments?.length ? { attachments: attachments.map(a => ({ ...a })) } : {}),
+					},
+					onAccepted,
+					undefined,
+					settleDelivery,
+				); // reuse the prepared payload
 			}
 			dropSteer();
 			settleDelivery();

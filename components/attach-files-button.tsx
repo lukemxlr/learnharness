@@ -3,7 +3,7 @@
 import { cloneElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { PaperclipIcon } from "lucide-react";
-import { directoryReferencePath, quoteFilePath } from "@/src/core";
+import { ATTACHMENT_INPUT_ACCEPT, directoryReferencePath, quoteFilePath } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
@@ -81,17 +81,29 @@ function AttachmentPopup({ anchorRef, rootRef, open, close, children }: {
  * folder choice returns the directory itself, including an empty directory.
  * aria-disabled, not disabled, so the tooltip still shows.
  */
-export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
+export function AttachFilesButton({
+	editorRef,
+	onUploadFiles,
+	accept = ATTACHMENT_INPUT_ACCEPT,
+	disabled = false,
+}: {
+	editorRef: React.RefObject<HTMLDivElement | null>;
+	onUploadFiles?: (files: File[]) => void;
+	accept?: string;
+	disabled?: boolean;
+}) {
 	const controller = useOptionalInteractionLayers();
 	const pickerRef = useRef<HTMLInputElement>(null);
 	const desktop = useDesktopPaths();
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const popupRef = useRef<HTMLDivElement>(null);
 	const choosingFolder = useRef(false);
+	const pendingDesktopActionRef = useRef<"path" | "upload" | null>(null);
 	const [open, setOpen] = useState(false);
 	const [notice, setNotice] = useState("");
 	const [placement, setPlacement] = useState<ReturnType<typeof attachmentPopupPlacement> | null>(null);
 	const positioned = placement !== null;
+	const browserUploadEnabled = !desktop && Boolean(onUploadFiles);
 	// Like MenuShell, portal to body with viewport-capped, reanchored placement.
 	// The production chat/new-session docks deliberately clip their children.
 	// Keep notice focus passive; only the choice menu takes keyboard focus.
@@ -146,27 +158,50 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 			<input
 				ref={pickerRef}
 				type="file"
+				accept={desktop ? undefined : accept}
 				multiple
 				hidden
 				data-testid="attach-files-input"
 				onChange={(e) => {
-					const resolve = window.lh?.getPathForFile;
-					const { paths } = resolve ? pathsForFiles(Array.from(e.currentTarget.files ?? []), resolve) : { paths: [] };
-					if (paths.length > 0) editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+					const action = pendingDesktopActionRef.current;
+					pendingDesktopActionRef.current = null;
+					const files = Array.from(e.currentTarget.files ?? []);
 					e.currentTarget.value = ""; // allow re-picking the same file
+					if (files.length === 0) return;
+					if (action === "upload" || (!desktop && onUploadFiles)) {
+						onUploadFiles?.(files);
+						return;
+					}
+					const resolve = window.lh?.getPathForFile;
+					const { paths } = resolve ? pathsForFiles(files, resolve) : { paths: [] };
+					if (paths.length > 0) {
+						editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+					} else if (action !== "path" && onUploadFiles) {
+						onUploadFiles(files);
+					}
 				}}
 			/>
-			<Hint label={desktop ? "Attach files or a folder" : BROWSER_NOTICE}>
+			<Hint label={desktop ? "Attach files or a folder" : browserUploadEnabled ? "Attach image or PDF" : BROWSER_NOTICE}>
 				<button
 					ref={buttonRef}
 					type="button"
 					aria-label="Attach files"
-					aria-disabled={!desktop}
-					aria-haspopup="menu"
-					aria-expanded={open}
+					aria-disabled={desktop || browserUploadEnabled ? false : true}
+					disabled={disabled}
+					aria-haspopup={desktop ? "menu" : undefined}
+					aria-expanded={desktop ? open : undefined}
 					data-testid="attach-files"
-					onClick={() => { if (desktop) { setNotice(""); setOpen(!open); } }}
-					className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
+					onClick={() => {
+						if (desktop) {
+							setNotice("");
+							setOpen(!open);
+						} else if (onUploadFiles && !disabled) {
+							setNotice("");
+							if (pickerRef.current) pickerRef.current.accept = accept;
+							pickerRef.current?.click();
+						}
+					}}
+					className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40 aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
 				>
 					<PaperclipIcon className="size-4" />
 				</button>
@@ -184,9 +219,21 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				}}>
 				{open ? <>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
+						onClick={() => {
+							pendingDesktopActionRef.current = "path";
+							if (pickerRef.current) pickerRef.current.removeAttribute("accept");
+							setOpen(false);
+							pickerRef.current?.click();
+						}}>Files</button>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { void chooseFolder(); }}>Folder</button>
+					{onUploadFiles && <button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+						onClick={() => {
+							pendingDesktopActionRef.current = "upload";
+							if (pickerRef.current) pickerRef.current.accept = accept;
+							setOpen(false);
+							pickerRef.current?.click();
+						}}>Upload image / PDF</button>}
 				</> : notice}
 			</div></AttachmentPopup>}
 		</div>

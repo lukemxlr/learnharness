@@ -151,7 +151,7 @@ afterEach(async () => { await cleanup?.(); cleanup = undefined; });
 
 /** linkedom has no Selection/default editing actions. The shim tests our offset
  * contract, NOT browser caret navigation or the native IME implementation. */
-async function fixture(initial: string, singleLine = false) {
+async function fixture(initial: string, singleLine = false, options?: { onPasteFiles?: (files: File[]) => void }) {
 	const { window: win, document: doc } = parseHTML("<html><body><div id='root'></div><button id='elsewhere'></button></body></html>");
 	let active: Element = doc.body;
 	Object.defineProperty(doc, "activeElement", { get: () => active });
@@ -175,7 +175,7 @@ async function fixture(initial: string, singleLine = false) {
 	const writes: string[] = [];
 	let keys = 0;
 	function draw() {
-		reactRoot.render(<PathInput ref={ref} singleLine={singleLine} value={value} onValueChange={(next) => { writes.push(next); value = next; draw(); }} onKeyDown={() => { keys++; }} />);
+		reactRoot.render(<PathInput ref={ref} singleLine={singleLine} value={value} onValueChange={(next) => { writes.push(next); value = next; draw(); }} onKeyDown={() => { keys++; }} onPasteFiles={options?.onPasteFiles} />);
 	}
 	await act(async () => { draw(); });
 	cleanup = async () => {
@@ -453,6 +453,48 @@ test("empty clipboard text stays a no-op before, during and after IME with a chi
 	await f.event("paste", { clipboardData });
 	assert.equal(f.value, source);
 	assert.deepEqual(f.writes, []);
+});
+
+test("Ctrl+V image or PDF paste invokes onPasteFiles without altering text, while preserving text paste", async () => {
+	const pasted: File[][] = [];
+	const f = await fixture("hello ", false, { onPasteFiles: (files) => { pasted.push(files); } });
+	const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "clipboard.png", { type: "image/png" });
+	const pasteImage = await f.event("paste", {
+		clipboardData: {
+			types: ["Files", "image/png"],
+			files: [png],
+			getData: () => "",
+		},
+	});
+	assert.equal(pasteImage.defaultPrevented, true);
+	assert.equal(pasted.length, 1);
+	assert.equal(pasted[0]?.[0], png);
+	assert.equal(f.value, "hello ");
+
+	const pdf = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], "notes.pdf", { type: "application/pdf" });
+	const pasteItem = await f.event("paste", {
+		clipboardData: {
+			types: ["Files"],
+			items: [{ kind: "file", type: "application/pdf", getAsFile: () => pdf }],
+			getData: () => "",
+		},
+	});
+	assert.equal(pasteItem.defaultPrevented, true);
+	assert.equal(pasted.length, 2);
+	assert.equal(pasted[1]?.[0], pdf);
+	assert.equal(f.value, "hello ");
+
+	// Normal text paste still inserts text cleanly and does not fire onPasteFiles.
+	f.select(6, 6);
+	const pasteText = await f.event("paste", {
+		clipboardData: {
+			types: ["text/plain"],
+			getData: (type: string) => (type === "text/plain" ? "world" : ""),
+		},
+	});
+	assert.equal(pasteText.defaultPrevented, true);
+	assert.equal(pasted.length, 2);
+	assert.equal(f.value, "hello world");
 });
 
 test("Shift+Delete delegates to cut, preserving full-source clipboard and deleting only once", async () => {
