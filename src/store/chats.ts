@@ -20,6 +20,8 @@ import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts"
 import { phaseAt3Lh } from "../core/phases.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
+type PersistedChatRecord = ChatRecord & { modifiedAt?: string };
+
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
 	return path.join(/* turbopackIgnore: true */ PATHS.chats, `${id}.json`);
@@ -36,11 +38,12 @@ function chatFile(id: string): string {
  *  not oversight. */
 function createChat(title: string, kind?: "practice"): ChatRecord {
 	const now = new Date().toISOString();
-	const record: ChatRecord = {
+	const record: PersistedChatRecord = {
 		id: `chat_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`,
 		title: title.trim() || "Untitled session",
 		createdAt: now,
 		updatedAt: now,
+		modifiedAt: now,
 		messages: [],
 		// Practice sessions carry the marker; teach stays ABSENT (absence
 		// reads as teach — pre-practice records never migrate).
@@ -56,7 +59,7 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
  *  record persist goes through here and carries the CURRENT version stamp —
  *  lazy migration means existing files only get stamped on their next write.
  *  A future-version guard lives on the read side (getChat). */
-function writeChat(record: ChatRecord): void {
+function writeChat(record: PersistedChatRecord): void {
 	writeFileAtomicSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
 }
 
@@ -75,7 +78,7 @@ function getChat(id: string): ChatRecord | null {
 		console.error(`[chat ${id}] record stamped with schema version ${v} > ${CURRENT_CHAT_VERSION} — this app build is older; refusing to read it`);
 		return null;
 	}
-	return parsed as ChatRecord;
+	return parsed as PersistedChatRecord;
 }
 
 function listChats(): ChatSummary[] {
@@ -84,9 +87,9 @@ function listChats(): ChatSummary[] {
 		return fs
 			.readdirSync(/* turbopackIgnore: true */ PATHS.chats)
 			.filter((f) => f.endsWith(".json"))
-			.map((f) => getChat(f.slice(0, -5)))
-			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, sideChats: _sideChats, ...summary }) => {
+			.map((f) => getChat(f.slice(0, -5)) as PersistedChatRecord | null)
+			.filter((r): r is PersistedChatRecord => r !== null)
+			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, sideChats: _sideChats, modifiedAt: _modifiedAt, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -130,12 +133,14 @@ function listChats(): ChatSummary[] {
  *  Wave B: replay is state.messages = record.messages). SILENT by the
  *  events law — see the SILENCE LAW comment at createChat. */
 function saveMessages(id: string, messages: LhMessage[]): void {
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	// Side-delivery watermarks are part of the appended native entries,
 	// so input + updates commit together without mutating thread history.
+	const now = new Date().toISOString();
 	record.messages = messages;
-	record.updatedAt = new Date().toISOString();
+	record.updatedAt = now;
+	record.modifiedAt = now;
 	writeChat(record);
 }
 
@@ -144,12 +149,13 @@ function saveImageSnapshot(id: string, snapshotId: string, image: ImageSnapshot)
 	if (!/^[a-f0-9]{64}$/.test(snapshotId) || createHash("sha256").update(Buffer.from(image.data, "base64")).digest("hex") !== snapshotId) {
 		throw new Error("Invalid image snapshot identity");
 	}
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	if (record.imageSnapshots?.[snapshotId]) return;
 	record.imageSnapshots = { ...record.imageSnapshots, [snapshotId]: {
 		mimeType: image.mimeType, data: image.data, width: image.width, height: image.height,
 	} };
+	record.modifiedAt = new Date().toISOString();
 	writeChat(record);
 }
 
@@ -158,11 +164,13 @@ function saveImageSnapshot(id: string, snapshotId: string, image: ImageSnapshot)
  * persist appends once, while continuation turns (which share a response
  *  message id) each keep their usage. */
 function appendTurnUsage(id: string, entry: TurnUsage): void {
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.turns = record.turns?.some((t) => t.id === entry.id)
-		? record.turns
-		: [...(record.turns ?? []), entry];
+	const alreadyPresent = record.turns?.some((t) => t.id === entry.id) ?? false;
+	if (!alreadyPresent) {
+		record.turns = [...(record.turns ?? []), entry];
+		record.modifiedAt = new Date().toISOString();
+	}
 	writeChat(record);
 }
 
@@ -170,22 +178,25 @@ function appendTurnUsage(id: string, entry: TurnUsage): void {
  * log — idempotent per startedAt: a retry that reaches the append twice
  * (abort replays) does not double-count spend. */
 function appendExtractionUsage(id: string, entry: ExtractionRunUsage): void {
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.extractions = record.extractions?.some((r) => r.startedAt === entry.startedAt)
-		? record.extractions
-		: [...(record.extractions ?? []), entry];
+	const alreadyPresent = record.extractions?.some((r) => r.startedAt === entry.startedAt) ?? false;
+	if (!alreadyPresent) {
+		record.extractions = [...(record.extractions ?? []), entry];
+		record.modifiedAt = new Date().toISOString();
+	}
 	writeChat(record);
 }
 
 /** Persist the per-chat model/thinking settings — replace-whole (the
  * picker sends the complete object; absent = config defaults). */
 function saveSettings(id: string, settings: ChatSettings): void {
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	// Like saveTree: a settings tweak is not conversation activity, so it
 	// deliberately does NOT bump updatedAt (sidebar order must not churn).
 	record.settings = settings;
+	record.modifiedAt = new Date().toISOString();
 	writeChat(record);
 }
 
@@ -195,9 +206,10 @@ function saveSettings(id: string, settings: ChatSettings): void {
  * string becomes "Untitled session" (the API gate rejects it first; this
  * is the honest floor for any other caller). */
 function renameChat(id: string, title: string): ChatRecord {
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	record.title = title.trim() || "Untitled session";
+	record.modifiedAt = new Date().toISOString();
 	writeChat(record);
 	emit("chats-changed", {});
 	return record;
@@ -220,11 +232,12 @@ function deleteChat(id: string): boolean {
 
 /** Persist the session plan tree (plan tools call this in execute). */
 function saveTree(id: string, tree: PlanTree): void {
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) throw new Error(`Chat not found: ${id}`);
 	record.tree = tree;
 	// Deliberately does NOT bump updatedAt: tree mutations piggyback on the
 	// turn's saveMessages, and sidebar ordering shouldn't churn on tree edits.
+	record.modifiedAt = new Date().toISOString();
 	writeChat(record);
 }
 
@@ -234,11 +247,12 @@ function saveTree(id: string, tree: PlanTree): void {
  *  chat is gone (a side answer finishing after session deletion). Silent
  *  and not conversation activity, like saveSettings. */
 function updateSideChats(id: string, update: (threads: SideChatThread[]) => SideChatThread[]): SideChatThread[] | null {
-	const record = getChat(id);
+	const record = getChat(id) as PersistedChatRecord | null;
 	if (!record) return null;
 	const next = update(record.sideChats ?? []);
 	if (next.length > 0) record.sideChats = next;
 	else delete record.sideChats;
+	record.modifiedAt = new Date().toISOString();
 	writeChat(record);
 	return next;
 }

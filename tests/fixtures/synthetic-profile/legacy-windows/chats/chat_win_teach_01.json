@@ -1,0 +1,195 @@
+{
+	"id": "chat_win_teach_01",
+	"title": "Pythagorean Theorem & Vectors",
+	"createdAt": "2026-11-05T09:00:00.000Z",
+	"updatedAt": "2026-11-05T09:15:00.000Z",
+	"modifiedAt": "2026-11-05T09:16:05.000Z",
+	"version": 2,
+	"settings": {
+		"model": {
+			"provider": "custom",
+			"id": "test-model-vision"
+		}
+	},
+	"imageSnapshots": {
+		"431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460": {
+			"mimeType": "image/png",
+			"data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+			"width": 1,
+			"height": 1
+		}
+	},
+	"messages": [
+		{
+			"id": "msg_win_u1",
+			"role": "user",
+			"content": [
+				{
+					"type": "text",
+					"text": "Review `C:\\Users\\Synth\\Notes\\diagram.png` and C:\\Users\\Synth\\Notes\\missing.png alongside /api/attachments/5e3d382db4dd83d59aa5742793ad6b7903409e865c83bcbc54835049f043bc15."
+				},
+				{
+					"type": "image",
+					"data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+					"mimeType": "image/png"
+				}
+			],
+			"timestamp": 1762333200000
+		},
+		{
+			"id": "msg_win_a1",
+			"role": "assistant",
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "test-model-vision",
+			"content": [
+				{
+					"type": "toolCall",
+					"id": "call_win_img_01",
+					"name": "show_image",
+					"arguments": {
+						"path": "C:\\Users\\Synth\\Notes\\diagram.png",
+						"caption": "Right triangle diagram"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "call_win_pdf_01",
+					"name": "pdf",
+					"arguments": {
+						"path": "\\\\nas\\study\\geometry.pdf",
+						"question": "Summarize the right triangle proof on page 1"
+					}
+				},
+				{
+					"type": "toolCall",
+					"id": "call_win_read_01",
+					"name": "read",
+					"arguments": {
+						"path": "notes/sketch.png"
+					}
+				}
+			],
+			"stopReason": "toolUse",
+			"usage": {
+				"input": 100,
+				"output": 40,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 140,
+				"cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+			},
+			"timestamp": 1762333210000
+		},
+		{
+			"id": "msg_win_tr1",
+			"role": "toolResult",
+			"toolCallId": "call_win_img_01",
+			"toolName": "show_image",
+			"isError": false,
+			"content": [
+				{
+					"type": "text",
+					"text": "Displayed diagram.png"
+				}
+			],
+			"details": {
+				"path": "C:\\Users\\Synth\\Notes\\diagram.png",
+				"mimeType": "image/png",
+				"snapshotId": "431ced6916a2a21a156e38701afe55bbd7f88969fbbfc56d7fe099d47f265460",
+				"width": 1,
+				"height": 1
+			},
+			"timestamp": 1762333211000
+		},
+		{
+			"id": "msg_win_tr2",
+			"role": "toolResult",
+			"toolCallId": "call_win_pdf_01",
+			"toolName": "pdf",
+			"isError": false,
+			"content": [
+				{
+					"type": "text",
+					"text": "Read geometry.pdf"
+				}
+			],
+			"details": {
+				"path": "\\\\nas\\study\\geometry.pdf",
+				"question": "Summarize the right triangle proof on page 1",
+				"brief": "Area comparison proof of a^2 + b^2 = c^2.",
+				"pagesRead": [1],
+				"pagesConsulted": [1]
+			},
+			"timestamp": 1762333212000
+		},
+		{
+			"id": "msg_win_a2",
+			"role": "assistant",
+			"api": "openai-completions",
+			"provider": "custom",
+			"model": "test-model-vision",
+			"content": [
+				{
+					"type": "text",
+					"text": "In any right triangle, the square on the hypotenuse equals the sum of the squares on the legs: a^2 + b^2 = c^2."
+				}
+			],
+			"stopReason": "stop",
+			"usage": {
+				"input": 120,
+				"output": 30,
+				"cacheRead": 0,
+				"cacheWrite": 0,
+				"totalTokens": 150,
+				"cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }
+			},
+			"timestamp": 1762333220000
+		}
+	],
+	"turns": [
+		{
+			"id": "turn_win_01",
+			"messageId": "msg_win_a2",
+			"at": "2026-11-05T09:15:00.000Z",
+			"model": "custom:test-model-vision",
+			"steps": [
+				{
+					"inputTokens": 120,
+					"outputTokens": 30,
+					"cacheReadTokens": 0,
+					"cacheWriteTokens": 0,
+					"reasoningTokens": 0
+				}
+			]
+		}
+	],
+	"sideChats": [
+		{
+			"id": "side_win_01",
+			"anchor": {
+				"messageId": "msg_win_a2",
+				"partId": "msg_win_a2-t0",
+				"blockIndex": 0,
+				"blockText": "In any right triangle, the square on the hypotenuse equals the sum of the squares on the legs: a^2 + b^2 = c^2."
+			},
+			"open": false,
+			"createdAt": "2026-11-05T09:16:00.000Z",
+			"messages": [
+				{
+					"id": "smsg_win_01",
+					"role": "user",
+					"text": "Does this require Euclidean flatness?",
+					"at": "2026-11-05T09:16:00.000Z"
+				},
+				{
+					"id": "smsg_win_02",
+					"role": "assistant",
+					"text": "Yes, on a sphere or hyperbolic plane the relation changes.",
+					"at": "2026-11-05T09:16:05.000Z",
+					"model": "custom:test-model-vision"
+				}
+			]
+		}
+	]
+}

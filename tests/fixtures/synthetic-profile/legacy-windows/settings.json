@@ -1,0 +1,40 @@
+{
+	"version": 1,
+	"customProvider": {
+		"baseUrl": "http://127.0.0.1:4000/v1",
+		"authMode": "keyless",
+		"models": [
+			{
+				"id": "test-model-vision",
+				"image": true,
+				"reasoning": true,
+				"context": 128000,
+				"maxTokens": 8192
+			}
+		]
+	},
+	"models": {
+		"strong": {
+			"model": {
+				"provider": "custom",
+				"id": "test-model-vision"
+			}
+		}
+	},
+	"agent": {
+		"fileAccess": {
+			"restricted": true,
+			"folders": [
+				"C:\\Users\\Synth\\Notes",
+				"\\\\nas\\study",
+				"/srv/synth/notes"
+			]
+		},
+		"prompts": {
+			"teacher/20-teaching.md": true
+		}
+	},
+	"appearance": {
+		"theme": "synth-slate"
+	}
+}

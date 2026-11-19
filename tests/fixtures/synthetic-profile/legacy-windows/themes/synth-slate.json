@@ -1,0 +1,18 @@
+{
+	"name": "Synth Slate",
+	"mode": "dark",
+	"colors": {
+		"background": "#101418",
+		"accent": "#38bdf8",
+		"surface": "#182026",
+		"bold": "#f8fafc",
+		"border": "#2d3748",
+		"italic": "#93c5fd",
+		"text": "#e2e8f0",
+		"code": "#fcd34d",
+		"textMuted": "#94a3b8",
+		"error": "#f87171",
+		"success": "#4ade80",
+		"warning": "#fbbf24"
+	}
+}

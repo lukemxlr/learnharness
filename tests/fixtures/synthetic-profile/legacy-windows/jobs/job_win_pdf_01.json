@@ -1,0 +1,21 @@
+{
+	"id": "job_win_pdf_01",
+	"kind": "pdf",
+	"chatId": "chat_win_teach_01",
+	"toolCallId": "call_win_pdf_01",
+	"input": {
+		"path": "\\\\nas\\study\\geometry.pdf",
+		"question": "Summarize the right triangle proof on page 1"
+	},
+	"status": "done",
+	"activity": "done",
+	"createdAt": "2026-11-05T09:10:00.000Z",
+	"updatedAt": "2026-11-05T09:11:00.000Z",
+	"result": {
+		"path": "\\\\nas\\study\\geometry.pdf",
+		"question": "Summarize the right triangle proof on page 1",
+		"brief": "Area comparison proof of a^2 + b^2 = c^2.",
+		"pagesRead": [1],
+		"pagesConsulted": [1]
+	}
+}

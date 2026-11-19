@@ -27,6 +27,7 @@ import {
 import type { SettingsStore } from "../core/ports.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 import { parseFileAccessSettings, type FileAccessSettingsResult } from "../core/file-access.ts";
+import { sanitizeFileAccessSettingsForPlatform } from "../core/contracts/migration.ts";
 
 const FILE_ACCESS_ERROR = "File-access configuration cannot be read reliably. Learner-file access is blocked. Repair File access in Settings → Agent → Tools.";
 
@@ -41,10 +42,14 @@ function fileAccessFromRecord(raw: unknown): FileAccessSettingsResult {
 	const value = (agent as Record<string, unknown>).fileAccess;
 	if (value === undefined) return { ok: true, settings: { restricted: false, folders: [] } };
 	const parsed = parseFileAccessSettings(value);
-	if (!parsed.ok || parsed.settings.folders.some((folder) => folder !== "~" && !folder.startsWith("~/") && !path.isAbsolute(folder))) {
+	if (!parsed.ok) {
 		return { ok: false, error: FILE_ACCESS_ERROR };
 	}
-	return parsed;
+	const sanitized = sanitizeFileAccessSettingsForPlatform(parsed.settings, process.platform);
+	if (sanitized.settings.folders.some((folder) => folder !== "~" && !folder.startsWith("~/") && !path.isAbsolute(folder))) {
+		return { ok: false, error: FILE_ACCESS_ERROR };
+	}
+	return { ok: true, settings: sanitized.settings };
 }
 
 /** ENOENT from a dangling settings/ancestor symlink is NOT first boot.
@@ -98,10 +103,13 @@ export function readSettings(): UserSettings | null {
 	}
 	const record = sanitizeUserSettings(parsed);
 	if (!record) return null;
-	if (!fileAccessFromRecord(parsed).ok) {
+	const fileAccess = fileAccessFromRecord(parsed);
+	if (!fileAccess.ok) {
 		// Unrelated section writes carry this safe placeholder, not a dropped
 		// malformed policy that would silently restore unrestricted reads.
 		record.agent = { ...record.agent, fileAccess: { restricted: true, folders: [] } };
+	} else if (record.agent?.fileAccess !== undefined) {
+		record.agent = { ...record.agent, fileAccess: fileAccess.settings };
 	}
 	// Version chain (empty today): a future v2 migration slots in here —
 	// `if (record.version > CURRENT_SETTINGS_VERSION) …`. Unknown NEWER

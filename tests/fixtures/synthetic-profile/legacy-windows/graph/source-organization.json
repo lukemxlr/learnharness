@@ -1,0 +1,21 @@
+{
+	"version": 1,
+	"folders": [
+		{
+			"id": "folder_win_geom",
+			"name": "Euclidean Geometry",
+			"parentId": null,
+			"createdAt": "2026-11-05T08:30:00.000Z",
+			"importPath": "C:\\Users\\Synth\\Notes"
+		}
+	],
+	"placements": {
+		"chat_win_teach_01": {
+			"folderId": "folder_win_geom"
+		},
+		"src_win_geom_01": {
+			"folderId": "folder_win_geom",
+			"name": "Geometry Notes"
+		}
+	}
+}
