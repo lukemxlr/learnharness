@@ -63,7 +63,7 @@ import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
-import { asAgentMessages, type LhMessage } from "../core/native-messages.ts";
+import { asAgentMessages, needsContinuation, pendingProblemDismissalOf, type LhMessage } from "../core/native-messages.ts";
 import { QUESTION_TOOLS } from "../core/pending.ts";
 import {
 	ChatInputError,
@@ -240,8 +240,10 @@ export async function handleChatInput(
 		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;
 	}
-	if ((input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") && isTurnRunning(chatId))
+	if ((input.type === "plugin-question-answer" || input.type === "plugin-problem-submission" || input.type === "continue") && isTurnRunning(chatId))
 		return Response.json({ error: "A turn is already running for this session" }, { status: 409 });
+	if (input.type === "continue" && !needsContinuation(record.messages) && pendingProblemDismissalOf(record.messages) === null)
+		return Response.json({ error: "Continuation is no longer owed" }, { status: 409 });
 	let questionResolver: QuestionTypeResolver | undefined;
 	let problemResolver: ProblemTypeResolver | undefined;
 	if (input.type === "plugin-problem-submission") {
@@ -565,6 +567,15 @@ export async function handleChatInput(
 	}
 
 	turnClaimed = true;
+	if (input.type === "continue") {
+		const current = stores.chatStore.getChat(chatId);
+		if (!current) return Response.json({ error: "Unknown chat" }, { status: 404 });
+		record = current;
+		if (!needsContinuation(record.messages) && pendingProblemDismissalOf(record.messages) === null) {
+			return Response.json({ error: "Continuation is no longer owed" }, { status: 409 });
+		}
+		appends = inputAppends(record, input);
+	}
 
 	// Write-ahead persistence: the input's native appends go on disk BEFORE
 	// the turn starts - the learner's answer is durable the instant the

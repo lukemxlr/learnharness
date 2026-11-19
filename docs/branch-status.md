@@ -1,6 +1,6 @@
 # Branch Status — `feat/lxc-server-ipad-draw-migration`
 
-Last updated: 2026-11-19T15:10:00Z
+Last updated: 2026-11-19T18:22:00Z
 
 ## Completed & Passed
 - **M0**: Cloned `https://github.com/amosblomqvist/learnharness` (`cb25c8e`) into `repo/` on `feat/lxc-server-ipad-draw-migration`; verified Linux Docker images (`node:26-bookworm-slim`, `mcr.microsoft.com/playwright:noble`).
@@ -27,13 +27,25 @@ Last updated: 2026-11-19T15:10:00Z
     - Live Node 26 CLI smoke: `export` -> `dry-run` `0` bytes -> `apply` `11003` bytes -> repeat `apply` `0` bytes
   - **Iteration 3 Gate Verdicts**: Reviewers 1&2 APPROVE, Challengers 1&2 APPROVE, Forensic Auditor CLEAN (**Gate Result: PASS**).
   - **Key Deliverables**: `src/core/contracts/migration.ts`, `src/server/migration.ts`, `scripts/migrate-profile.mjs`, `src/store/chats.ts`, `src/store/settings.ts`, `tests/migration.test.ts`, `tests/fixtures/synthetic-profile/legacy-windows/**`.
+- **M3 (Live Stream Handoff & Electron Remote Client — R3) — DONE & VERIFIED (Committed)**:
+  - **Iteration 4 Gate Verdict — PASS 5/5**:
+    - `reviewer_m3_r4_1`: APPROVE (`507/507` 28-file suite)
+    - `reviewer_m3_r4_2`: APPROVE (`219/219` 8-file suite)
+    - `challenger_m3_r4_1`: APPROVE (`188/188` + Probes 1–4)
+    - `challenger_m3_r4_2`: APPROVE (`83/83` + Electron probes)
+    - `auditor_m3_r4`: CLEAN (2x cold `10/10` `tests/live-stream-handoff.test.ts` & `228/228` target suite)
+  - **Packaging Verification**: `electron-builder.yml` (`files: ["!**/*", "electron/**/*", "package.json"]`) already covers `electron/remote-config.cjs`, `electron/preload-remote.cjs`, `electron/preload-setup.cjs`, `electron/setup.html`, and `electron/remote-reconnect.html` (`package.json` unchanged).
+  - **Key M3 Deliverables (24 files)**:
+    - Server keepalive & live-stream handoff: `src/server/stream-keepalive.ts`, `src/server/pi/ui-stream.ts`, `src/server/side-chat.ts`, `src/server/chat-handler.ts`, `app/api/jobs/route.ts`, `app/api/chats/[id]/route.ts`, `app/api/chats/[id]/stream/route.ts`, `app/api/chats/[id]/side-chats/route.ts`, `app/api/chats/[id]/side-chats/[threadId]/route.ts`
+    - Client session resync: `components/chat.tsx`, `components/session-core.ts`, `components/session.ts`
+    - Isolated Electron remote client: `electron/remote-config.cjs`, `electron/preload-remote.cjs`, `electron/preload-setup.cjs`, `electron/setup.html`, `electron/remote-reconnect.html`, `electron/chatgpt-ipc.cjs`, `electron/main.cjs`
+    - Tests: `tests/live-stream-handoff.test.ts`, `tests/live-stream-handoff-ui.test.tsx`, `tests/side-chat-ping.test.tsx`, `tests/electron-remote.test.ts`, `tests/session-core.test.ts`
 - **E2E Track (`M-E2E-1` & `M-E2E-2`) — Gate PASS**: Isolated Playwright WebKit harness (`tests/e2e/**`) and synthetic fixtures (`tests/fixtures/e2e-synthetic/**`) with `167` Tiers 1–4 specs ready under `tests/e2e/**` (kept unstaged until E2E checkpoint).
 
 ## Remaining Milestones & Open Work
-1. **M3 (Live Stream Handoff & Electron Remote Client — R3)** — **Next / Active**: Server-side SSE `: ping` / NDJSON `{"type":"ping"}` keepalive, `useServerResync` mid-stream handoff between two independent clients without starting a second model run, `preload-remote.cjs` / `preload-setup.cjs`, server URL config/change/reconnect, strict local IPC isolation.
-2. **M4 (Attachments & Overhauled Drawing Pad — R5)**: `Ctrl+V` Windows screenshot paste, PDF model delivery, MC & Free-Response attachment previews, overhauled `plugins/drawing-pad` (grid, colors, widths, undo/redo, independent `Light`/`Dark`/`App` paper theme, per-question local draft, "Add to answer").
-3. **M5 (iPadOS Safari / WebKit UI & Responsive Viewport Matrix — R4)**: `viewport-fit=cover`, `safe-area-inset-*`, overlay drawer, `visualViewport` keyboard handling, touch targets, automated WebKit viewport matrix in CSS px.
-4. **E2E Track (`M-E2E-1` & `M-E2E-2` execution against landed M2–M5)** & **M6 (Final Integration Gate Tiers 1–5 + R7 English Docs `docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`)**.
-5. **Deferred Hardware / VM / LXC Tests (User-Triggered / Isolated Environment Only)**: Windows VM Electron launch/NSIS installer/updater/`Ctrl+V` tests, real iPadOS Safari/Apple Pencil hardware tests, live LXC systemd + Cloudflare Tunnel + real ChatGPT Plus OAuth + real profile migration.
+1. **M4 (Attachments & Overhauled Drawing Pad — R5)** — **Next / Active**: `Ctrl+V` Windows screenshot paste, PDF model delivery, MC & Free-Response attachment previews, overhauled `plugins/drawing-pad` (grid, colors, widths, undo/redo, independent `Light`/`Dark`/`App` paper theme, per-question local draft, "Add to answer").
+2. **M5 (iPadOS Safari / WebKit UI & Responsive Viewport Matrix — R4)**: `viewport-fit=cover`, `safe-area-inset-*`, overlay drawer, `visualViewport` keyboard handling, touch targets, automated WebKit viewport matrix in CSS px.
+3. **E2E Track (`M-E2E-1` & `M-E2E-2` execution against landed M2–M5)** & **M6 (Final Integration Gate Tiers 1–5 + R7 English Docs `docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`)**.
+4. **Deferred Hardware / VM / LXC Tests (User-Triggered / Isolated Environment Only)**: Windows-VM Electron GUI / NSIS installer / auto-updater / `Ctrl+V` checks, real iPadOS Safari / Apple Pencil checks, and live LXC systemd + Cloudflare Tunnel + real ChatGPT Plus OAuth + real profile migration.
 
 See `PROJECT.md` at repository root for architecture contracts and baseline design notes.

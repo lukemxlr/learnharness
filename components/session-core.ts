@@ -53,6 +53,7 @@ export interface SessionRecordSnapshot {
 	turnError?: string;
 	pluginQuestionAvailability?: PluginQuestionAvailability;
 	turnInFlight?: boolean;
+	compacting?: boolean;
 	turns?: TurnUsage[];
 	pricing?: SessionPricing;
 }
@@ -124,27 +125,43 @@ class StreamReadError extends Error {
 }
 
 /** Wire events; return true ONLY for the explicit completion marker. */
-export async function* sseEvents(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Record<string, unknown>, boolean> {
+export async function* sseEvents(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	onActivity?: () => void,
+): AsyncGenerator<Record<string, unknown>, boolean> {
 	const decoder = new TextDecoder();
 	let buf = "";
-	for (;;) {
-		let chunk: ReadableStreamReadResult<Uint8Array>;
-		try { chunk = await reader.read(); }
-		catch (err) { throw new StreamReadError(err); }
-		const { done, value } = chunk;
-		if (done) return false;
-		buf += decoder.decode(value, { stream: true });
+	const drain = function* (): Generator<Record<string, unknown>, boolean> {
 		for (;;) {
 			const end = buf.indexOf("\n\n");
 			if (end === -1) break;
 			const event = buf.slice(0, end);
 			buf = buf.slice(end + 2);
+			onActivity?.();
 			const dataLine = event.split("\n").find((l) => l.startsWith("data: "));
 			if (!dataLine) continue;
 			const data = dataLine.slice("data: ".length);
 			if (data === "[DONE]") return true;
 			yield JSON.parse(data) as Record<string, unknown>;
 		}
+		return false;
+	};
+	for (;;) {
+		let chunk: ReadableStreamReadResult<Uint8Array>;
+		try { chunk = await reader.read(); }
+		catch (err) { throw new StreamReadError(err); }
+		const { done, value } = chunk;
+		if (done) {
+			const flushed = buf + decoder.decode();
+			buf = flushed.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+			return yield* drain();
+		}
+		if (value && value.byteLength > 0) onActivity?.();
+		const text = buf + decoder.decode(value, { stream: true });
+		const hasTrailingCr = text.endsWith("\r");
+		const body = hasTrailingCr ? text.slice(0, -1) : text;
+		buf = body.replace(/\r\n/g, "\n").replace(/\r/g, "\n") + (hasTrailingCr ? "\r" : "");
+		if (yield* drain()) return true;
 	}
 }
 
@@ -326,6 +343,7 @@ export class SessionModel {
 	/** Retain the latest request across stop(): an opening POST still owns
 	 * its refusal after view detachment, but never after a newer request. */
 	private latestRequest: AbortController | null = null;
+	private lastStreamActivityAtValue = 0;
 	/** Synchronous ready check for the gate (send/read mount logic). */
 	readyRef = true;
 
@@ -396,6 +414,10 @@ export class SessionModel {
 
 	get status(): SessionStatus {
 		return this.statusValue;
+	}
+
+	get lastStreamActivityAt(): number {
+		return this.lastStreamActivityAtValue;
 	}
 
 	/** Mutate model state + notify (the hook re-renders). */
@@ -473,6 +495,10 @@ export class SessionModel {
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
 		} else if (mode === "replace") {
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
+			if (this.reconciliationValue !== "ready" && !this.reconciliationTask) {
+				this.reconciliationValue = "ready";
+				this.readyRef = this.statusValue === "ready";
+			}
 			this.replaceMessages(record.messages, record.turnError, record.pluginQuestionAvailability, record.pluginProblemAvailability);
 		}
 		return record;
@@ -569,7 +595,7 @@ export class SessionModel {
 			finally { onPostPending?.(false); }
 		};
 		let response = await post();
-		if (input.type === "plugin-question-answer" || input.type === "plugin-problem-submission") return response;
+		if (input.type === "plugin-question-answer" || input.type === "plugin-problem-submission" || input.type === "continue") return response;
 		let waited = 0;
 		while (response.status === 409) {
 			await response.body?.cancel().catch(() => {});
@@ -716,8 +742,9 @@ export class SessionModel {
 		const reader = res.body.getReader();
 		let sawEvent = false;
 		let sawDone = false;
+		this.lastStreamActivityAtValue = Date.now();
 		try {
-			const events = sseEvents(reader);
+			const events = sseEvents(reader, () => { this.lastStreamActivityAtValue = Date.now(); });
 			for (;;) {
 				let next: IteratorResult<Record<string, unknown>, boolean>;
 				try { next = await events.next(); }
@@ -765,7 +792,7 @@ export class SessionModel {
 
 	private async fetchView(url: string, signal: AbortSignal | undefined, recoveringDrop: boolean): Promise<Response> {
 		try {
-			const res = await this.fetch(url, { signal });
+			const res = await this.fetch(url, { signal, cache: "no-store" });
 			if (recoveringDrop && !res.ok) throw new Error((await res.text()) || STREAM_DROPPED);
 			return res;
 		} catch (err) {
@@ -819,6 +846,8 @@ export class SessionModel {
 				this.streamingMessageId = null;
 			});
 		}
+		this.lastStreamActivityAtValue = Date.now();
+		this.setError(null);
 		this.setStatus("submitted");
 		try {
 			if (refetchRecordFirst) {
@@ -893,6 +922,7 @@ export class SessionModel {
 		this.latestRequest = controller;
 		this.evaluationOwner = (input.type === "plugin-question-answer" && pluginPending?.requiresGrading) ||
 			(input.type === "plugin-problem-submission" && activeProblemOf(this.base)?.pluginProblem?.requiresProcessing) ? controller : null;
+		this.lastStreamActivityAtValue = Date.now();
 		this.setError(null);
 		this.setStatus("submitted");
 		if (recovering && input.type === "answer") {
@@ -969,8 +999,13 @@ export class SessionModel {
 				// superseded request must never clear its successor's label.
 				if (this.evaluationOwner === controller) this.mutate(() => { this.evaluationOwner = null; });
 			}
-			if (res.status === 409) {
+			if (res.status === 409 || (input.type === "continue" && res.status === 400)) {
+				await res.body?.cancel().catch(() => {});
 				settleDelivery();
+				if (input.type === "continue") {
+					if (this.consumeAbort === controller) await this.resumeStream(true);
+					return false;
+				}
 				throw new Error("A turn is already running — try again in a moment.");
 			}
 			if (!res.ok) {

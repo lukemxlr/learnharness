@@ -5,6 +5,8 @@
 import { parseSideOpenInput, SideChatInputError } from "@/src/core";
 import { sideChats } from "@/src/server";
 
+export const dynamic = "force-dynamic";
+
 type Ctx = { params: Promise<{ id: string; threadId: string }> };
 
 export async function PATCH(request: Request, ctx: Ctx): Promise<Response> {

@@ -32,12 +32,21 @@ const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cj
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const {
+	readRemoteConfig,
+	writeRemoteConfig,
+	allowedOriginForConfig,
+	shouldUseLocalDataDir,
+	validateServerUrl,
+	probeServerHealth,
+} = require("./remote-config.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
 // renderer owns the number; this is the IPC widen target).
@@ -156,6 +165,53 @@ let subscriptionChild = null;
 let desktopAPISecret = null;
 let reopenWindow = null;
 const trustedAppWindows = new Set();
+const setupWindows = new Set();
+let remoteModeActive = false;
+let activeRemoteConfig = { mode: "unset", serverUrl: null };
+let activeRemoteOrigin = null;
+let lastRemoteError = null;
+let currentRemoteWindow = null;
+let currentSetupWindow = null;
+let swappingWindow = false;
+let staticAllowedUrl = null;
+
+const REMOTE_CSP = [
+	"default-src 'self'",
+	"base-uri 'self'",
+	"form-action 'self'",
+	"frame-ancestors 'none'",
+	"object-src 'none'",
+	"script-src 'self' 'unsafe-inline'",
+	"style-src 'self' 'unsafe-inline'",
+	"img-src 'self' data: blob:",
+	"font-src 'self' data:",
+	"media-src 'self' blob:",
+	"worker-src 'self' blob:",
+	"connect-src 'self' wss://api.deepgram.com",
+].join("; ");
+
+function originForHttpUrl(raw) {
+	if (typeof raw !== "string" || !raw) return null;
+	try {
+		const parsed = new URL(raw);
+		if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) {
+			return null;
+		}
+		return parsed.origin;
+	} catch {
+		return null;
+	}
+}
+
+function getAllowedOrigin(fallbackUrl = staticAllowedUrl) {
+	if (remoteModeActive) return allowedOriginForConfig(activeRemoteConfig);
+	if (!fallbackUrl) return null;
+	try {
+		return new URL(fallbackUrl).origin;
+	} catch {
+		return null;
+	}
+}
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -317,91 +373,133 @@ function openExternalLink(target) {
  *  - will-navigate pinned to the app origin; window.open always denied —
  *    external links go to the real browser via shell.openExternal, for
  *    http, https and mailto only (openExternalLink). */
-function createWindow(url) {
-	const win = new BrowserWindow({
-		width: 1440,
-		height: 900,
-		title: PRODUCT_NAME,
-		// Merged chrome (owner, 2026-09-17): the system title bar is gone;
-		// the app's own 60px header bands ARE the title bar. The traffic
-		// lights float over the sidebar's LH wordmark band, vertically
-		// Aligned to the PHASE PILL's drawn box, not the band's geometric
-		// center (owner ask, 2026-09-17): macOS centers each 12px circle at
-		// y+6.75, and the pill box center measures 29.25 in the running app
-		// (band 0–59.5, pill box 19–39.5) — y 22.5 lands the circles at
-		// 29.25, exactly on the pill. Wordmark gutter: components/sidebar.tsx.
-		// Dragging comes from the renderer's .lh-drag bands (app/globals.css).
-		...(process.platform === "darwin"
-			? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 22.5 } }
-			: {
-				titleBarStyle: "hidden",
-				// Native min/max/close on the right, at the OS's compact default
-				// height. Do not force the zoom-invariant native overlay to match
-				// the renderer's 60 CSS px bar: zooming out would cover its border.
-				// The renderer reserves the actual width via env(titlebar-area-*).
-				titleBarOverlay: chromeColors(appearance),
-				// Keep the custom bar alone; Alt reveals the native menu.
-				autoHideMenuBar: true,
-			}),
-		webPreferences: {
-			contextIsolation: true,
-			sandbox: true,
-			nodeIntegration: false,
-			...(process.env.LH_DEV_URL ? { additionalArguments: ["--lh-web-subscriptions"] } : {}),
-			preload: path.join(__dirname, "preload.cjs"),
-		},
-		// Live-resize + first-paint flash (owner, 2026-09-17): during a resize
-		// the native window surface changes size before Chromium's compositor
-		// has a frame at the new size, and the gap shows the window's NATIVE
-		// background — Electron's default is white, glaring on a dark app.
-		// The app's background for the rendered mode fills the lag instead
-		// (chromeColors). `show: false` + ready-to-show is the same treatment
-		// for first paint: the window appears only once the page has
-		// actually rendered.
-		backgroundColor: chromeColors(appearance).color,
-		show: false,
-		// Narrow-window behavior (owner, 2026-09-17): 640px is the floor —
-		// below it even a wrapped chrome row gets cramped and the chat header
-		// (lights gutter 92 + toggle + title) runs out of room. The sidebar
-		// auto-closes below 928 = 640 + 288 (sidebar) in the renderer
-		// (components/sidebar.tsx, SIDEBAR_AUTOCLOSE); its "lh:expand-window"
-		// IPC widens the window back to that threshold.
-		minWidth: 640,
-		minHeight: 600,
-	});
-
-	trustedAppWindows.add(win);
-	win.once("closed", () => trustedAppWindows.delete(win));
-	const allowedOrigin = () => new URL(url).origin;
-	// Deny-by-default; the ONLY grants are media (mic/STT groundwork) and
-	// clipboard-sanitized-write — the copy affordances in the transcript
-	// (md-blocks copy corners) call navigator.clipboard.writeText(), which
-	// Chromium only honors with that permission (chrome-melt tweaks wave,
-	// 2026-09-19; before this grant every copy silently rejected). Still
-	// loopback-origin only — Electron's default is auto-approve-everything,
-	// and we do not ship that.
-	// "local-fonts": the appearance section's reading-font picker (2026-09-26).
+function installPermissionHandlers(fallbackUrl) {
 	const allowedPermissions = new Set(["media", "clipboard-sanitized-write", "local-fonts"]);
-	const fromOwnOrigin = (origin, permission) =>
-		origin === allowedOrigin() && allowedPermissions.has(permission);
+	const fromOwnOrigin = (origin, permission) => {
+		const allowed = getAllowedOrigin(fallbackUrl);
+		return Boolean(allowed && origin && origin === allowed && allowedPermissions.has(permission));
+	};
 	session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-		const requestOrigin = details.requestingUrl ? new URL(details.requestingUrl).origin : null;
+		const requestOrigin = originForHttpUrl(details?.requestingUrl);
 		callback(fromOwnOrigin(requestOrigin, permission));
 	});
 	session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => {
 		return fromOwnOrigin(origin, permission);
 	});
+}
 
-	win.webContents.on("will-navigate", (event, target) => {
-		if (new URL(target).origin !== allowedOrigin()) {
+function windowChromeOptions() {
+	return {
+		width: 1440,
+		height: 900,
+		title: PRODUCT_NAME,
+		...(process.platform === "darwin"
+			? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 22.5 } }
+			: {
+				titleBarStyle: "hidden",
+				titleBarOverlay: chromeColors(appearance),
+				autoHideMenuBar: true,
+			}),
+		backgroundColor: chromeColors(appearance).color,
+		show: false,
+		minWidth: 640,
+		minHeight: 600,
+	};
+}
+
+function createWindow(url, opts = {}) {
+	const isRemote = opts.remote === true;
+	const preloadFile = opts.preloadFile ?? (isRemote ? "preload-remote.cjs" : "preload.cjs");
+	staticAllowedUrl = url;
+	const win = new BrowserWindow({
+		...windowChromeOptions(),
+		webPreferences: {
+			contextIsolation: true,
+			sandbox: true,
+			nodeIntegration: false,
+			...(!isRemote && process.env.LH_DEV_URL ? { additionalArguments: ["--lh-web-subscriptions"] } : {}),
+			preload: path.join(__dirname, preloadFile),
+		},
+	});
+
+	trustedAppWindows.add(win);
+	win.once("closed", () => {
+		trustedAppWindows.delete(win);
+		if (currentRemoteWindow === win) currentRemoteWindow = null;
+	});
+	installPermissionHandlers(url);
+
+	const checkNavigation = (event, target) => {
+		const targetOrigin = originForHttpUrl(target);
+		const allowed = getAllowedOrigin(url);
+		if (!allowed || targetOrigin !== allowed) {
 			event.preventDefault();
 			openExternalLink(target);
 		}
-	});
+	};
+	win.webContents.on("will-navigate", checkNavigation);
+	win.webContents.on("will-redirect", checkNavigation);
 	win.webContents.setWindowOpenHandler(({ url: target }) => {
 		openExternalLink(target);
 		return { action: "deny" };
 	});
+
+	if (isRemote) {
+		win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+			if (!isMainFrame || errorCode === -3) return;
+			if (win.isDestroyed?.() || win !== currentRemoteWindow) return;
+			lastRemoteError = errorDescription || `Connection failed (${errorCode})`;
+			log(`remote load failed (${errorCode}): ${lastRemoteError}`);
+			openReconnectWindow();
+		});
+		win.webContents.on("context-menu", (_event, params) => {
+			if (win.isDestroyed?.() || win !== currentRemoteWindow) return;
+			const template = [];
+			if (params?.isEditable) {
+				template.push(
+					{ role: "undo" },
+					{ role: "redo" },
+					{ type: "separator" },
+					{ role: "cut" },
+					{ role: "copy" },
+					{ role: "paste" },
+					{ role: "selectAll" },
+					{ type: "separator" },
+				);
+			} else if (params?.selectionText) {
+				template.push({ role: "copy" }, { type: "separator" });
+			}
+			template.push(
+				{
+					label: "Change Server URL…",
+					click: () => {
+						if (win.isDestroyed?.() || win !== currentRemoteWindow) return;
+						lastRemoteError = null;
+						openSetupWindow("setup.html");
+					},
+				},
+				{
+					label: "Reload",
+					click: () => {
+						if (win.isDestroyed?.() || win !== currentRemoteWindow) return;
+						win.webContents.reload?.();
+					},
+				},
+				{
+					label: "Reconnect",
+					click: () => {
+						if (win.isDestroyed?.() || win !== currentRemoteWindow) return;
+						lastRemoteError = null;
+						openReconnectWindow();
+					},
+				},
+			);
+			const menu = Menu.buildFromTemplate(template);
+			if (typeof menu?.popup === "function") {
+				menu.popup({ window: win });
+			}
+		});
+	}
 
 	void win.loadURL(url);
 	// Zoom truth reaches the renderer for EVERY load (reload, nav): the
@@ -423,6 +521,128 @@ function createWindow(url) {
 
 	win.once("ready-to-show", () => win.show());
 	return win;
+}
+
+function createSetupWindow(pageName) {
+	const win = new BrowserWindow({
+		...windowChromeOptions(),
+		webPreferences: {
+			contextIsolation: true,
+			sandbox: true,
+			nodeIntegration: false,
+			preload: path.join(__dirname, "preload-setup.cjs"),
+		},
+	});
+	setupWindows.add(win);
+	win.once("closed", () => {
+		setupWindows.delete(win);
+		if (currentSetupWindow === win) currentSetupWindow = null;
+	});
+	installPermissionHandlers(null);
+	win.webContents.on("will-navigate", (event) => { event.preventDefault(); });
+	win.webContents.on("will-redirect", (event) => { event.preventDefault(); });
+	win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+	const filePath = path.join(__dirname, pageName);
+	if (typeof win.loadFile === "function") void win.loadFile(filePath);
+	else void win.loadURL(pathToFileURL(filePath).href);
+	win.once("ready-to-show", () => win.show());
+	return win;
+}
+
+function closeWindowSafely(win) {
+	if (!win) return;
+	trustedAppWindows.delete(win);
+	setupWindows.delete(win);
+	try {
+		if (!win.isDestroyed?.()) win.close();
+	} catch { /* already closed */ }
+}
+
+function openRemoteWindow(origin) {
+	swappingWindow = true;
+	try {
+		const prevRemote = currentRemoteWindow;
+		const prevSetup = currentSetupWindow;
+		const next = createWindow(origin, { remote: true, preloadFile: "preload-remote.cjs" });
+		currentRemoteWindow = next;
+		currentSetupWindow = null;
+		if (prevRemote && prevRemote !== next) closeWindowSafely(prevRemote);
+		if (prevSetup) closeWindowSafely(prevSetup);
+		return next;
+	} finally {
+		swappingWindow = false;
+	}
+}
+
+function openSetupWindow(pageName = "setup.html") {
+	swappingWindow = true;
+	try {
+		const prevRemote = currentRemoteWindow;
+		const prevSetup = currentSetupWindow;
+		const next = createSetupWindow(pageName);
+		currentSetupWindow = next;
+		currentRemoteWindow = null;
+		if (prevSetup && prevSetup !== next) closeWindowSafely(prevSetup);
+		if (prevRemote) closeWindowSafely(prevRemote);
+		return next;
+	} finally {
+		swappingWindow = false;
+	}
+}
+
+function openReconnectWindow() {
+	return openSetupWindow("remote-reconnect.html");
+}
+
+function isTrustedSetupSender(event) {
+	const win = BrowserWindow.fromWebContents(event.sender);
+	if (!win || win.isDestroyed?.() || !setupWindows.has(win)) return false;
+	if (event.senderFrame !== event.sender.mainFrame) return false;
+	try {
+		const parsed = new URL(event.senderFrame.url);
+		if (parsed.protocol !== "file:") return false;
+		const page = path.basename(parsed.pathname);
+		return page === "setup.html" || page === "remote-reconnect.html";
+	} catch {
+		return false;
+	}
+}
+
+function installRemoteWebRequestHandlers() {
+	session.defaultSession.webRequest?.onHeadersReceived?.({ urls: ["<all_urls>"] }, (details, callback) => {
+		const responseHeaders = details.responseHeaders ? { ...details.responseHeaders } : {};
+		const requestOrigin = originForHttpUrl(details.url);
+		const allowed = getAllowedOrigin();
+		if (allowed && requestOrigin === allowed) {
+			const hasCsp = Object.keys(responseHeaders).some((k) => {
+				if (k.toLowerCase() !== "content-security-policy") return false;
+				const val = responseHeaders[k];
+				const values = Array.isArray(val) ? val : [val];
+				return values.some((v) => typeof v === "string" && v.trim().length > 0);
+			});
+			if (!hasCsp) {
+				for (const k of Object.keys(responseHeaders)) {
+					if (k.toLowerCase() === "content-security-policy") delete responseHeaders[k];
+				}
+				responseHeaders["Content-Security-Policy"] = [REMOTE_CSP];
+			}
+			if (
+				details.resourceType === "mainFrame" &&
+				[502, 503, 504, 530].includes(details.statusCode) &&
+				currentRemoteWindow &&
+				!currentRemoteWindow.isDestroyed?.() &&
+				(details.webContentsId === undefined || details.webContentsId === currentRemoteWindow.webContents?.id)
+			) {
+				lastRemoteError = `Server unavailable (HTTP ${details.statusCode})`;
+				setImmediate(() => {
+					if (currentRemoteWindow && !currentRemoteWindow.isDestroyed?.()) {
+						openReconnectWindow();
+					}
+				});
+			}
+		}
+		callback({ responseHeaders });
+	});
 }
 
 /* ── Zoom (owner round 7, 2026-10-05): ⌘±/⌘0 as an OWNED ladder ──────────
@@ -613,20 +833,22 @@ function applyZoom(win, factor) {
 
 /** macOS needs an application menu with the Edit roles — without one,
  *  Cmd+C/V/A do nothing in the renderer. Everything else stays minimal. */
-function installMenu() {
+function installMenu({ remoteMode = false, onChangeServerUrl } = {}) {
+	const appSubmenu = [
+		{ role: "about" },
+		...(remoteMode
+			? [{ label: "Change Server URL…", accelerator: "CommandOrControl+Alt+S", click: () => onChangeServerUrl?.() }]
+			: [{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() }]),
+		{ type: "separator" },
+		{ role: "hide" },
+		{ role: "hideOthers" },
+		{ type: "separator" },
+		{ role: "quit" },
+	];
 	const template = [
 		{
 			label: app.name,
-			submenu: [
-				{ role: "about" },
-				// Manual checks report their result in Settings → General.
-				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
-				{ type: "separator" },
-				{ role: "hide" },
-				{ role: "hideOthers" },
-				{ type: "separator" },
-				{ role: "quit" },
-			],
+			submenu: appSubmenu,
 		},
 		{ label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
 		{
@@ -642,17 +864,17 @@ function installMenu() {
 				{
 					label: "Actual Size",
 					accelerator: "CommandOrControl+0",
-					click: () => applyZoom(BrowserWindow.getAllWindows()[0], 1),
+					click: () => { const win = BrowserWindow.getAllWindows()[0]; if (win) applyZoom(win, 1); },
 				},
 				{
 					label: "Zoom In",
 					accelerator: "CommandOrControl+Plus",
-					click: () => zoomStep(BrowserWindow.getAllWindows()[0], +1),
+					click: () => { const win = BrowserWindow.getAllWindows()[0]; if (win) zoomStep(win, +1); },
 				},
 				{
 					label: "Zoom Out",
 					accelerator: "CommandOrControl+-",
-					click: () => zoomStep(BrowserWindow.getAllWindows()[0], -1),
+					click: () => { const win = BrowserWindow.getAllWindows()[0]; if (win) zoomStep(win, -1); },
 				},
 				{ type: "separator" },
 				{ role: "togglefullscreen" },
@@ -665,6 +887,7 @@ function installMenu() {
 
 async function main() {
 	app.on("window-all-closed", () => {
+		if (swappingWindow) return;
 		chatgpt?.pause();
 		subscriptions?.pause();
 		// macOS convention: the app stays resident, reactivated from the Dock.
@@ -678,115 +901,206 @@ async function main() {
 
 	await app.whenReady();
 
-	// Read the same record/custom theme the server uses before constructing
-	// any native window, including the external development shell.
-	appearance = readAppearance(serverDataDir({
-		devUrl: process.env.LH_DEV_URL, env: process.env,
-		packagedDataDir: DATA_DIR(), repoRoot: path.join(__dirname, ".."),
-	}));
-	nativeTheme.themeSource = themeSourceFor(appearance.mode);
-
-	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
-	// spawn, no packaging, full HMR. The rest of this shell still applies
-	// (guards, menu, single instance).
 	const devUrl = process.env.LH_DEV_URL;
-	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
-	if (!devUrl) {
-		desktopAPISecret = randomBytes(32).toString("hex");
-		const ownedOrigin = new URL(url).origin;
-		// All URLs, not only /api: remove the header again on external redirects.
-		session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => {
-			callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
-		});
-		chatgpt = createChatGPT({
-			store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json")),
-			openExternal: (target) => shell.openExternal(target),
-			onChange: (value) => {
-				chatgptChild?.send(value);
-				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:chatgpt:changed");
-			},
-		});
-		subscriptions = createSubscriptions({
-			directory: app.getPath("userData"),
-			loadSDK: () => loadSubscriptionSDK(path.dirname(serverEntry())),
-			openExternal: (target) => shell.openExternal(target),
-			onChange: (snapshot) => {
-				subscriptionChild?.send(snapshot);
-				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:subscriptions:changed");
-			},
-		});
-		await subscriptions.ready;
-		log(`starting server: ${serverEntry()}`);
-		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
-		await startServer(new URL(url).port);
-		await waitUntilUp(url);
-		log(`server up: ${url}`);
-	} else {
-		log(`dev mode: ${devUrl} — waiting for server`);
-		const { waitForDevServer } = require("./dev-server-readiness.cjs");
-		const startup = new AbortController();
-		const cancelStartup = () => startup.abort(new Error("Development startup cancelled by application quit"));
-		app.once("before-quit", cancelStartup);
-		try {
-			await waitForDevServer(devUrl, { signal: startup.signal });
-			if (startup.signal.aborted) return;
-			log(`dev server ready: ${devUrl}`);
-		} catch (error) {
-			if (!startup.signal.aborted) {
-				log(`dev server startup failed: ${error?.message ?? error}`);
-				app.exit(1);
+	const forceLocal = process.argv.includes("--local") || process.env.LH_LOCAL_MODE === "1";
+	const initialConfig = !devUrl && !forceLocal ? readRemoteConfig(app.getPath("userData")) : null;
+	const isLocalMode = Boolean(devUrl || forceLocal || shouldUseLocalDataDir(initialConfig));
+	remoteModeActive = !isLocalMode;
+
+	if (!remoteModeActive) {
+		// Read the same record/custom theme the server uses before constructing
+		// any native window, including the external development shell.
+		appearance = readAppearance(serverDataDir({
+			devUrl: process.env.LH_DEV_URL, env: process.env,
+			packagedDataDir: DATA_DIR(), repoRoot: path.join(__dirname, ".."),
+		}));
+		nativeTheme.themeSource = themeSourceFor(appearance.mode);
+
+		// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
+		// spawn, no packaging, full HMR. The rest of this shell still applies
+		// (guards, menu, single instance).
+		const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
+		staticAllowedUrl = url;
+		if (!devUrl) {
+			desktopAPISecret = randomBytes(32).toString("hex");
+			const ownedOrigin = new URL(url).origin;
+			// All URLs, not only /api: remove the header again on external redirects.
+			session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => {
+				callback({ requestHeaders: desktopAPIHeaders(details, ownedOrigin, desktopAPISecret, [...trustedAppWindows]) });
+			});
+			chatgpt = createChatGPT({
+				store: fileStore(path.join(app.getPath("userData"), "chatgpt-credentials.json")),
+				openExternal: (target) => shell.openExternal(target),
+				onChange: (value) => {
+					chatgptChild?.send(value);
+					for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:chatgpt:changed");
+				},
+			});
+			subscriptions = createSubscriptions({
+				directory: app.getPath("userData"),
+				loadSDK: () => loadSubscriptionSDK(path.dirname(serverEntry())),
+				openExternal: (target) => shell.openExternal(target),
+				onChange: (snapshot) => {
+					subscriptionChild?.send(snapshot);
+					for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:subscriptions:changed");
+				},
+			});
+			await subscriptions.ready;
+			log(`starting server: ${serverEntry()}`);
+			log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
+			await startServer(new URL(url).port);
+			await waitUntilUp(url);
+			log(`server up: ${url}`);
+		} else {
+			log(`dev mode: ${devUrl} — waiting for server`);
+			const { waitForDevServer } = require("./dev-server-readiness.cjs");
+			const startup = new AbortController();
+			const cancelStartup = () => startup.abort(new Error("Development startup cancelled by application quit"));
+			app.once("before-quit", cancelStartup);
+			try {
+				await waitForDevServer(devUrl, { signal: startup.signal });
+				if (startup.signal.aborted) return;
+				log(`dev server ready: ${devUrl}`);
+			} catch (error) {
+				if (!startup.signal.aborted) {
+					log(`dev server startup failed: ${error?.message ?? error}`);
+					app.exit(1);
+				}
+				return;
+			} finally {
+				app.removeListener("before-quit", cancelStartup);
 			}
-			return;
-		} finally {
-			app.removeListener("before-quit", cancelStartup);
 		}
+
+		// Renderer controls contain no token/URL/code operation. The separate server
+		// child is the only recipient of credential leases over inherited IPC.
+		ipcMain.handle("lh:chatgpt:control", async (event, command) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) return { error: "Untrusted desktop request." };
+			if (command?.op === "start-headless" || command?.op === "complete-headless") return { error: "Headless ChatGPT sign-in is unavailable in desktop mode." };
+			if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections." };
+			return chatGPTControl(command, chatgpt);
+		});
+
+		ipcMain.handle("lh:subscriptions:control", async (event, command) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) throw new Error("Untrusted desktop request.");
+			if (!subscriptions || !serverProcess?.connected) {
+				if (command?.op === "status") return [];
+				throw new Error("Subscription sign-in requires the desktop app's private server connection.");
+			}
+			return subscriptionControl(command, subscriptions);
+		});
+
+		// The dev shell has no browser tabs. Only a one-use action on its own
+		// Next server may be resolved here; never accept an arbitrary external URL.
+		ipcMain.handle("lh:subscriptions:web-browser", async (event, action) => {
+			if (!devUrl || !trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) throw new Error("Untrusted development request.");
+			await openWebSubscriptionBrowser(action, getAllowedOrigin(url), { openExternal: (target) => shell.openExternal(target) });
+		});
+
+		ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
+			BrowserWindow, dialog, trustedAppWindows, origin: getAllowedOrigin(url),
+		}));
+
+		installMenu({ remoteMode: false });
+
+		// Auto-update (Wave C): wire the updater before the window so the
+		// banner channel is live from first paint; the first check and the 24h
+		// interval fire after it below. setupAutoUpdater's contract: failures
+		// are log lines — this can never block boot.
+		setupAutoUpdater();
+		ipcMain.on("lh:update-install", (event) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) return;
+			installUpdateNow();
+		});
+		ipcMain.handle("lh:update:get", (event) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) throw new Error("Untrusted desktop request.");
+			return updateState;
+		});
+		ipcMain.handle("lh:update:check", (event) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) throw new Error("Untrusted desktop request.");
+			checkForUpdates({ manual: true });
+		});
+
+		reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
+	} else {
+		appearance = normalizeAppearance(null);
+		nativeTheme.themeSource = themeSourceFor(appearance.mode);
+		activeRemoteConfig = initialConfig ?? { mode: "unset", serverUrl: null };
+		activeRemoteOrigin = allowedOriginForConfig(activeRemoteConfig);
+		lastRemoteError = null;
+
+		installRemoteWebRequestHandlers();
+		installMenu({
+			remoteMode: true,
+			onChangeServerUrl: () => {
+				lastRemoteError = null;
+				openSetupWindow("setup.html");
+			},
+		});
+
+		ipcMain.handle("lh:remote:change-server", (event) => {
+			const win = BrowserWindow.fromWebContents(event.sender);
+			if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
+				throw new Error("Untrusted remote request.");
+			}
+			lastRemoteError = null;
+			openSetupWindow("setup.html");
+			return { ok: true };
+		});
+
+		ipcMain.handle("lh:setup:get-state", (event) => {
+			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			return {
+				serverUrl: activeRemoteConfig.serverUrl ?? "",
+				canCancel: Boolean(activeRemoteOrigin),
+				lastError: lastRemoteError,
+			};
+		});
+
+		ipcMain.handle("lh:setup:save", async (event, rawUrl) => {
+			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			const validated = validateServerUrl(rawUrl);
+			if (!validated.ok) return { ok: false, error: validated.error };
+			const probe = await probeServerHealth(validated.origin);
+			if (!probe.ok) return { ok: false, error: probe.error };
+			const saved = writeRemoteConfig(app.getPath("userData"), { mode: "remote", serverUrl: validated.origin });
+			activeRemoteConfig = saved;
+			activeRemoteOrigin = allowedOriginForConfig(saved);
+			lastRemoteError = null;
+			openRemoteWindow(activeRemoteOrigin);
+			return { ok: true, serverUrl: activeRemoteOrigin };
+		});
+
+		ipcMain.handle("lh:setup:reconnect", async (event) => {
+			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			if (!activeRemoteOrigin) return { ok: false, error: "No server URL configured." };
+			const probe = await probeServerHealth(activeRemoteOrigin);
+			if (!probe.ok) {
+				lastRemoteError = probe.error;
+				return { ok: false, error: probe.error };
+			}
+			lastRemoteError = null;
+			openRemoteWindow(activeRemoteOrigin);
+			return { ok: true, serverUrl: activeRemoteOrigin };
+		});
+
+		ipcMain.handle("lh:setup:open", (event) => {
+			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			lastRemoteError = null;
+			openSetupWindow("setup.html");
+			return { ok: true };
+		});
+
+		ipcMain.handle("lh:setup:cancel", (event) => {
+			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			if (!activeRemoteOrigin) return { ok: false };
+			lastRemoteError = null;
+			openRemoteWindow(activeRemoteOrigin);
+			return { ok: true };
+		});
+
+		reopenWindow = () => (activeRemoteOrigin ? openRemoteWindow(activeRemoteOrigin) : openSetupWindow("setup.html"));
 	}
-
-	// Renderer controls contain no token/URL/code operation. The separate server
-	// child is the only recipient of credential leases over inherited IPC.
-	ipcMain.handle("lh:chatgpt:control", async (event, command) => {
-		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return { error: "Untrusted desktop request." };
-		if (command?.op === "start-headless" || command?.op === "complete-headless") return { error: "Headless ChatGPT sign-in is unavailable in desktop mode." };
-		if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections." };
-		return chatGPTControl(command, chatgpt);
-	});
-
-	ipcMain.handle("lh:subscriptions:control", async (event, command) => {
-		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
-		if (!subscriptions || !serverProcess?.connected) {
-			if (command?.op === "status") return [];
-			throw new Error("Subscription sign-in requires the desktop app's private server connection.");
-		}
-		return subscriptionControl(command, subscriptions);
-	});
-
-	// The dev shell has no browser tabs. Only a one-use action on its own
-	// Next server may be resolved here; never accept an arbitrary external URL.
-	ipcMain.handle("lh:subscriptions:web-browser", async (event, action) => {
-		if (!devUrl || !trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted development request.");
-		await openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: (target) => shell.openExternal(target) });
-	});
-
-	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
-		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,
-	}));
-
-	installMenu();
-
-	// Auto-update (Wave C): wire the updater before the window so the
-	// banner channel is live from first paint; the first check and the 24h
-	// interval fire after it below. setupAutoUpdater's contract: failures
-	// are log lines — this can never block boot.
-	setupAutoUpdater();
-	ipcMain.on("lh:update-install", () => installUpdateNow());
-	ipcMain.handle("lh:update:get", (event) => {
-		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
-		return updateState;
-	});
-	ipcMain.handle("lh:update:check", (event) => {
-		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
-		checkForUpdates({ manual: true });
-	});
 
 	// Sidebar-at-narrow-window (owner, 2026-09-17): the renderer auto-closes
 	// the sidebar below SIDEBAR_AUTOCLOSE (928px); opening it again at that
@@ -795,9 +1109,14 @@ async function main() {
 	// window grows right. No-op when already wide.
 	// The renderer's first paint can race did-finish-load — it asks for
 	// the current factor itself (mirrors "lh:zoom" pushes).
-	ipcMain.handle("lh:zoom:get", (event) => BrowserWindow.fromWebContents(event.sender)?.webContents.getZoomFactor() ?? 1);
+	ipcMain.handle("lh:zoom:get", (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender);
+		if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) return 1;
+		return win?.webContents.getZoomFactor() ?? 1;
+	});
 	ipcMain.on("lh:expand-window", (event) => {
 		const win = BrowserWindow.fromWebContents(event.sender);
+		if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) return;
 		if (!win) return;
 		const { x, y, width, height } = win.getBounds();
 		const target = SIDEBAR_AUTOCLOSE;
@@ -806,21 +1125,30 @@ async function main() {
 	// The renderer reports every appearance write (and the record on load):
 	// the chrome follows without a restart.
 	ipcMain.on("lh:appearance", (event, next) => {
-		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return;
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) return;
 		appearance = normalizeAppearance(next);
 		nativeTheme.themeSource = themeSourceFor(appearance.mode);
 		for (const win of BrowserWindow.getAllWindows()) applyChrome(win);
 	});
-	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
+
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();
 	});
-	createWindow(url);
-	log(`window open: ${url}`);
-	// Startup + 24h checks stay main-owned and read the current preference.
-	// No renderer subscription is required; late loads retrieve the snapshot.
-	if (autoUpdater) {
-		checkForUpdates();
-		setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+
+	if (!remoteModeActive) {
+		createWindow(staticAllowedUrl);
+		log(`window open: ${staticAllowedUrl}`);
+		// Startup + 24h checks stay main-owned and read the current preference.
+		// No renderer subscription is required; late loads retrieve the snapshot.
+		if (autoUpdater) {
+			checkForUpdates();
+			setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+		}
+	} else if (activeRemoteOrigin) {
+		openRemoteWindow(activeRemoteOrigin);
+		log(`remote window open: ${activeRemoteOrigin}`);
+	} else {
+		openSetupWindow("setup.html");
+		log("remote setup window open");
 	}
 }

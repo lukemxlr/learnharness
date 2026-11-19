@@ -2,6 +2,7 @@ import type { Agent, AgentEvent, AgentMessage } from "@earendil-works/pi-agent-c
 import { ToolCallIdUniquifier } from "./call-ids.ts";
 import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
 import { pluginQuestionLedgerFor } from "../../agent/plugin-question-tools.ts";
+import { resolveStreamKeepaliveMs } from "../stream-keepalive.ts";
 
 /**
  * THE NATIVE WIRE (Wave D, owner-approved 2026-09-26): one agent turn, streamed
@@ -103,6 +104,9 @@ export interface PiTurnSpec {
 	/** The coalescing window for update fan-out (COMPACTION LAW above).
 	 *  Defaults to 100ms; tests tighten it. */
 	updateFlushMs?: number;
+	/** Periodic SSE `: ping\n\n` keepalive interval while a view is attached
+	 *  and the turn has not settled. Defaults to 15_000ms; tests tighten it. */
+	heartbeatMs?: number;
 }
 
 /** One view onto a running turn: push() replays/streams an event, done()
@@ -128,7 +132,7 @@ export interface PiTurnHandle {
 }
 
 export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
-	const { agent, onError, onFinish, onSettleError, onSettleFailure, usedToolCallIds, updateFlushMs = 100, requestCycle } = spec;
+	const { agent, onError, onFinish, onSettleError, onSettleFailure, usedToolCallIds, updateFlushMs = 100, heartbeatMs = resolveStreamKeepaliveMs(), requestCycle } = spec;
 	const uniquifier = usedToolCallIds ? new ToolCallIdUniquifier(usedToolCallIds) : undefined;
 	const questions = pluginQuestionLedgerFor(agent);
 
@@ -310,6 +314,13 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	return {
 		subscribe() {
 			let sub: PiTurnSubscriber | undefined;
+			let heartbeat: ReturnType<typeof setInterval> | undefined;
+			const stopHeartbeat = () => {
+				if (heartbeat !== undefined) {
+					clearInterval(heartbeat);
+					heartbeat = undefined;
+				}
+			};
 			const stream = new ReadableStream<Uint8Array>({
 				start(controller) {
 					const encoder = new TextEncoder();
@@ -322,9 +333,12 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 							} catch {
 								/* reader cancelled — stop emitting, keep running */
 								closed = true;
+								stopHeartbeat();
+								if (sub) subscribers.delete(sub);
 							}
 						},
 						done() {
+							stopHeartbeat();
 							if (closed) return;
 							closed = true;
 							try {
@@ -345,12 +359,30 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 					for (const event of log) sub.push(event);
 					// A subscriber that attached after settle (the unregister
 					// race) still gets the full history + [DONE].
-					if (settled) sub.done();
+					if (settled) {
+						sub.done();
+					} else if (!closed && heartbeatMs > 0) {
+						heartbeat = setInterval(() => {
+							if (closed || settled) {
+								stopHeartbeat();
+								return;
+							}
+							try {
+								controller.enqueue(encoder.encode(": ping\n\n"));
+							} catch {
+								closed = true;
+								stopHeartbeat();
+								if (sub) subscribers.delete(sub);
+							}
+						}, heartbeatMs);
+						(heartbeat as { unref?: () => void }).unref?.();
+					}
 				},
 				cancel() {
 					// THE OWNER RULING (2026-09-25): a view leaving NEVER kills
 					// the turn — only the explicit abort channel does. The turn
 					// runs on; the compacted log keeps the state for the next view.
+					stopHeartbeat();
 					if (sub) subscribers.delete(sub);
 				},
 			});

@@ -896,6 +896,41 @@ describe("automatic continuation after recovery failure", () => {
 		await m.continueIfOwed(answered);
 		assert.equal(posts, 1);
 	});
+
+	for (const status of [409, 400] as const) {
+		it(`send({ type: "continue" }) settles cleanly without error when the server rejects stale continue with ${status}`, async () => {
+			let posts = 0;
+			let streams = 0;
+			let deliverySettled = 0;
+			const settledAssistant = assistantMsg("a_settled", "Turn already settled on server.");
+			const m = model({
+				initialMessages: answered,
+				fetch: async (url, init) => {
+					const u = String(url);
+					if (u === "/api/chat" && init?.method === "POST") {
+						posts++;
+						return Response.json({ error: "Continuation is no longer owed" }, { status });
+					}
+					if (u === "/api/chats/chat_x") {
+						return Response.json({ messages: [...answered, settledAssistant], turnInFlight: false });
+					}
+					if (u === "/api/chats/chat_x/stream") {
+						streams++;
+						return sseResponse({ type: "turn-settled" }, "[DONE]");
+					}
+					throw new Error(`unexpected fetch: ${u}`);
+				},
+			});
+			const accepted = await m.send({ type: "continue" }, undefined, undefined, () => { deliverySettled++; });
+			assert.equal(accepted, false);
+			assert.equal(posts, 1);
+			assert.equal(streams, 1);
+			assert.equal(deliverySettled, 1);
+			assert.equal(m.status, "ready");
+			assert.equal(m.getState().error, null);
+			assert.equal(m.getState().nativeMessages.at(-1)?.id, "a_settled");
+		});
+	}
 });
 
 // ─── failed answer submissions (no replay without canonical reconciliation) ──

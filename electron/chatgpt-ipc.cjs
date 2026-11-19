@@ -23,9 +23,12 @@ function attachChatGPTChild(child, connection) {
 
 /** Sender must be the trusted window's main frame at its exact app origin. */
 function trustedSender(event, origin, BrowserWindow) {
+	if (!origin || typeof origin !== "string") return false;
 	const win = BrowserWindow.fromWebContents(event.sender);
 	try {
-		return !!win && event.senderFrame === event.sender.mainFrame && new URL(event.senderFrame.url).origin === origin;
+		if (!win || win.isDestroyed?.() || event.senderFrame !== event.sender.mainFrame) return false;
+		const parsed = new URL(event.senderFrame.url);
+		return (parsed.protocol === "http:" || parsed.protocol === "https:") && !parsed.username && !parsed.password && parsed.origin === origin;
 	} catch { return false; }
 }
 async function chatGPTControl(command, connection) {

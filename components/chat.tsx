@@ -306,7 +306,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, getLastStreamActivityAt, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const controller = useOptionalInteractionLayers();
@@ -603,6 +603,7 @@ export function Chat({
 	const turnInFlightRef = useRef(turnInFlight);
 	turnInFlightRef.current = turnInFlight;
 	const attachToRunningTurn = useCallback(() => {
+		turnInFlightRef.current = true;
 		setTurnInFlight(true);
 		void resumeStream();
 	}, [resumeStream]);
@@ -1099,6 +1100,8 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
+	const compactingRef = useRef(compacting);
+	compactingRef.current = compacting;
 	submissionLive.current.ready = !compacting && reconciliation === "ready";
 	// A failed model response (issue #110): Retry keeps the saved input
 	// and completed work, without another learner message. Offered from
@@ -1149,6 +1152,11 @@ export function Chat({
 		if (!record) return;
 		if (Array.isArray(record.turns)) setTurns(record.turns);
 		setPricing(record.pricing);
+		if (typeof record.compacting === "boolean") setCompacting(record.compacting);
+		if (record.turnInFlight === true && !localStreamRef.current && !turnInFlightRef.current) {
+			attachToRunningTurn();
+			return;
+		}
 		// The continuation seam (contracts.ts protocol §4): a job result
 		// landing in the record leaves the agent owing a continuation — the
 		// record ENDS on un-consumed results, the dock owns no question, and
@@ -1157,7 +1165,7 @@ export function Chat({
 		// Current model truth also guards retained/live failures: canonical
 		// sync must never automatically replace a reply that failed to save.
 		continueIfOwed(record.messages);
-	}, [readRecord, continueIfOwed]);
+	}, [readRecord, continueIfOwed, attachToRunningTurn]);
 
 	// The settled terminal's other half (stream-reattach wave): the
 	// transport resolved turn-settled — no turn running, the record is
@@ -1404,10 +1412,10 @@ export function Chat({
 	// old chatId).
 	const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const fetchJobsRef = useRef<() => void>(() => {});
-	const fetchJobs = useCallback(async () => {
+	const fetchJobs = useCallback(async (): Promise<{ jobs?: JobRecord[]; turnInFlight?: boolean } | null> => {
 		try {
-			const res = await fetch(`/api/jobs?chatId=${encodeURIComponent(chatId)}`);
-			if (!res.ok) return;
+			const res = await fetch(`/api/jobs?chatId=${encodeURIComponent(chatId)}`, { cache: "no-store" });
+			if (!res.ok) return null;
 			const data = (await res.json()) as { jobs?: JobRecord[]; turnInFlight?: boolean };
 			const list = data.jobs ?? [];
 			for (const j of list) {
@@ -1440,12 +1448,14 @@ export function Chat({
 				void syncFromServer();
 			}
 			setJobs(list);
+			return data;
 			// (Wake-turn adoption that lived here — the turnInFlight attach
 			// line — died at S3: turn-started on the events channel owns
 			// discovery now. turnInFlight is STILL READ above: the settle
 			// logic's idle check needs it.)
 		} catch {
 			/* transient fetch failure — the next jobs-changed announcement re-fetches */
+			return null;
 		}
 	}, [chatId, syncFromServer, adoptAppendOnly]);
 	fetchJobsRef.current = () => void fetchJobs();
@@ -1465,8 +1475,120 @@ export function Chat({
 			fetchJobsRef.current();
 		}, 250);
 	});
-	// Reconnect catch-up: events missed while the channel was down.
-	useServerResync(() => fetchJobsRef.current());
+	const statusRef = useRef(status);
+	statusRef.current = status;
+	const STALE_STREAM_MS = 45_000;
+	const resyncInFlightRef = useRef<Promise<void> | null>(null);
+	const resyncPendingRef = useRef<"channel" | "wake" | null>(null);
+	const resyncMountedRef = useRef(true);
+	useEffect(() => {
+		resyncMountedRef.current = true;
+		return () => {
+			resyncMountedRef.current = false;
+		};
+	}, []);
+	const runResync = useCallback(async (_reason: "channel" | "wake") => {
+		if (!resyncMountedRef.current) return;
+		const data = await fetchJobs();
+		if (!resyncMountedRef.current || !data) return;
+		if (localStreamRef.current) {
+			const idleMs = Date.now() - getLastStreamActivityAt();
+			if (idleMs <= STALE_STREAM_MS) return;
+			if (data.turnInFlight === true) {
+				attachToRunningTurn();
+				return;
+			}
+			if (statusRef.current === "submitted") {
+				const record = await readRecord({ adoption: "none" }).catch(() => undefined);
+				if (!resyncMountedRef.current || !record) return;
+				if (record.turnInFlight === true) {
+					attachToRunningTurn();
+					return;
+				}
+				if (record.compacting === true) {
+					setCompacting(true);
+					return;
+				}
+				if (compactingRef.current) setCompacting(false);
+			}
+			if (Date.now() - getLastStreamActivityAt() <= STALE_STREAM_MS) return;
+			stop();
+			localStreamRef.current = false;
+			statusRef.current = "ready";
+			await syncFromServer();
+			return;
+		}
+		if (data.turnInFlight === true) {
+			if (!turnInFlightRef.current || statusRef.current === "error") {
+				if (statusRef.current === "error") clearError();
+				attachToRunningTurn();
+			}
+			return;
+		}
+		if (turnInFlightRef.current) {
+			setTurnInFlight(false);
+		}
+		if (statusRef.current === "error") {
+			const record = await readRecord({ adoption: "none" }).catch(() => undefined);
+			if (!resyncMountedRef.current) return;
+			if (record) {
+				if (record.turnInFlight === true) {
+					clearError();
+					attachToRunningTurn();
+					return;
+				}
+				if (!record.turnError) {
+					clearError();
+					stop();
+				}
+			}
+		}
+		await syncFromServer();
+	}, [fetchJobs, getLastStreamActivityAt, attachToRunningTurn, clearError, readRecord, stop, syncFromServer]);
+	const resyncFromServerRef = useRef<(reason: "channel" | "wake") => Promise<void>>(async () => {});
+	const resyncFromServer = useCallback((reason: "channel" | "wake") => {
+		if (resyncInFlightRef.current) {
+			resyncPendingRef.current = reason === "channel" ? "channel" : (resyncPendingRef.current ?? "wake");
+			return resyncInFlightRef.current;
+		}
+		const task = (async () => {
+			let nextReason: "channel" | "wake" | null = reason;
+			while (nextReason && resyncMountedRef.current) {
+				const current = nextReason;
+				resyncPendingRef.current = null;
+				await runResync(current);
+				nextReason = resyncPendingRef.current;
+			}
+		})().finally(() => {
+			if (resyncInFlightRef.current === task) resyncInFlightRef.current = null;
+		});
+		resyncInFlightRef.current = task;
+		return task;
+	}, [runResync]);
+	resyncFromServerRef.current = resyncFromServer;
+	// Reconnect catch-up: events missed while the channel was down or device slept.
+	useServerResync(() => {
+		void resyncFromServerRef.current("channel");
+	});
+	useEffect(() => {
+		const onVisibilityChange = () => {
+			if (document.visibilityState === "visible") void resyncFromServerRef.current("wake");
+		};
+		const onFocus = () => {
+			void resyncFromServerRef.current("wake");
+		};
+		const onOnline = () => {
+			void resyncFromServerRef.current("wake");
+		};
+		document.addEventListener("visibilitychange", onVisibilityChange);
+		window.addEventListener("focus", onFocus);
+		window.addEventListener("online", onOnline);
+		return () => {
+			document.removeEventListener("visibilitychange", onVisibilityChange);
+			window.removeEventListener("focus", onFocus);
+			window.removeEventListener("online", onOnline);
+		};
+	}, []);
 	useEffect(
 		() => () => {
 			if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
@@ -1481,8 +1603,6 @@ export function Chat({
 	// 1500ms fallback record poll: discovery is no longer a polling window
 	// that can expire. Handlers read REFS, not closure state — events fire
 	// between renders, and a ref holds the live value at event time.
-	const statusRef = useRef(status);
-	statusRef.current = status;
 	/** Fix B (2026-10-02): turn-settled arrived for OUR OWN turn — the
 	 * record is durable (endTurn fires only after persistTurn); the ready
 	 * flip consumes this flag to canonize the view onto the record. See the

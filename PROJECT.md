@@ -1,7 +1,7 @@
 # Project: LearnHarness Production Multi-Device & LXC Extension
 
 **Branch**: `feat/lxc-server-ipad-draw-migration` (in `c:\Users\User\Desktop\LearnHarness\repo`, branched from `cb25c8e49b85eed9e78315584731cad73a0118a6`)
-**Checkpoint Date**: 2026-11-18T20:57:00Z (Urgent Pause & Clean Checkpoint)
+**Checkpoint Date**: 2026-11-19T18:22:00Z (Milestone 3 Checkpoint Commit)
 **Architecture Review Status**: Audited by `reviewer_architecture_plan` (`18939c38`); all 8 Critical/Major/Minor findings integrated prior to M1 execution.
 
 ## Hard Safety & Isolation Constraints
@@ -11,7 +11,7 @@
 
 ---
 
-## Verified Progress vs. Open Items (Checkpoint 2026-11-18T20:57:00Z)
+## Verified Progress vs. Open Items (Checkpoint 2026-11-19T18:22:00Z)
 
 ### 1. Completed & Passed
 - **M0 (Checkout, Branch & Docker Readiness)**:
@@ -19,64 +19,46 @@
   - Verified Linux Docker images (`node:26-bookworm-slim` v26.13.1, `mcr.microsoft.com/playwright:noble` with `webkit-2051`).
 - **Architecture & Milestone Plan Audit**:
   - `PROJECT.md` audited against `ORIGINAL_REQUEST.md` (R1–R7, Acceptance Criteria, ESLint 4-zone rules, standalone leak guards) and updated for all 8 findings.
-- **M1 Implementation (`F1`–`F5`: Docker Runner, Attachment Store, Test Provider, LXC/Proxy, Single-Account Auth, Headless ChatGPT OAuth & Model Catalog)**:
-  - **Implemented files**:
-    - F1: `docker/Dockerfile.test`, `scripts/docker-test.ps1`, `scripts/docker-test.sh`, `src/core/contracts/attachments.ts`, `src/server/attachments.ts`, `tests/attachments-store.test.ts`
-    - F2: `tests/helpers/test-provider.ts`, `tests/fixtures/synthetic-profile/` (100% synthetic geometry/algebra data), `tests/test-provider.test.ts`
-    - F3: `src/server/desktop-access.ts` (`LH_TRUST_PROXY`, `X-Forwarded-Proto`/`Host`, hardened `browserHostAllowed`), `app/api/health/route.ts`, `deploy/systemd/learnharness.service`, `deploy/systemd/learnharness.env.example`, `tests/proxy-trust.test.ts`
-    - F4: `config.ts` (`USER_AUTH_FILE`), `src/core/contracts/auth.ts`, `src/server/user-auth.ts`, `scripts/user-auth.mjs`, `app/api/auth/{login,logout,session}/route.ts`, `app/_lib/auth.ts`, `components/login-form.tsx`, `app/login/page.tsx`, `app/layout.tsx`, page auth guards (`app/page.tsx`, `app/chat/new/page.tsx`, `app/chat/[id]/page.tsx`, `app/plugins/[pluginId]/[viewId]/page.tsx`, `app/settings/page.tsx`), `components/settings/settings-dialog.tsx`, `proxy.ts`, `src/server/plugin-transport.ts`, `next.config.ts` & `scripts/build-server.mjs` (`user-auth.json*` leak guards), `tests/user-auth.test.ts`, updated `tests/plugin-document-proxy.test.ts`
-    - F5 (R6): `electron/chatgpt.cjs`, `electron/chatgpt-ipc.cjs`, `electron/main.cjs`, `src/core/contracts/{chatgpt,models}.ts`, `src/server/web-subscription-http.ts`, `src/agent/chatgpt-bridge.ts`, `src/server/model-catalog.ts`, `app/api/models/refresh/route.ts`, `components/model-catalog.ts`, `components/settings/{subscription-client,chatgpt-connection,keys-section,agent-section}.tsx`, `components/sidebar.tsx`, `tests/chatgpt-headless-catalog.test.ts`, updated `tests/chatgpt-stream.test.ts`
-  - **Checks actually passed in Linux Docker (`learnharness-test:node26`)**:
-    - `docker-test.ps1 build-image` (Exit 0)
-    - `docker-test.ps1 setup` (`npm ci` + `npm run plugins:setup`, Exit 0)
-    - Targeted M1 suites (39/40 initial -> `test-provider.test.ts` fixed and passed 3/3 after final edit): `attachments-store.test.ts` (4/4), `chatgpt-headless-catalog.test.ts` (3/3), `chatgpt-stream.test.ts` (11/11), `plugin-document-proxy.test.ts` (8/8), `proxy-trust.test.ts` (6/6), `user-auth.test.ts` (5/5), `test-provider.test.ts` (3/3).
-    - Worker 2 (`2602f3fe`) passed post-edit Docker `typecheck` (Exit 0), `lint` (Exit 0, 0 errors), `build` (Exit 0), and `smoke` (`smoke-provider-runtime`, `build-server`, `smoke-server --isolated`, Exit 0).
-    - Worker 2 ran full `npm test` (`task-347`): **5,339 / 5,352 passed across 708 suites** (8 failed + 1 cancelled due to full-core CPU/bind-mount timeout; re-run with `--test-concurrency=4` was interrupted by urgent user pause).
-- **E2E Testing Track (M-E2E-1 Infrastructure & Tier 1 Suite)**:
-  - **Implemented files**: Standalone `tests/e2e/**` (`Dockerfile`, `package.json`, `playwright.config.mjs`, `run-docker-e2e.sh`, harness `mock-provider.mjs` + `server-controller.mjs` + `electron-harness.mjs` + `layout-assertions.mjs`, 64 Tier 1 specs) and synthetic fixtures under `tests/fixtures/e2e-synthetic/**`.
-  - **Checks actually passed in Docker WebKit (`learnharness-e2e:local`, Playwright 1.46.1 / WebKit 18.0)**:
-    - Worker 7 (`04f5aa00`) passed `--selfcheck` (4/4), `--list` (68 specs), `--tier1 --list` (64 specs), and 65-case WebKit layout/geometry probe; Iteration 7 Challenger 1 (`51e3ba11`) returned `CONFIRM` (18-case WebKit edge-case probe).
+- **M1 (`F1`–`F5`: Docker Runner, Attachment Store, Test Provider, LXC/Proxy, Single-Account Auth, Headless ChatGPT OAuth & Model Catalog) — DONE & VERIFIED (`29fbecc`)**:
+  - Iteration 2 Docker Verification Gates (`learnharness-test:node26`): `typecheck` Exit `0`, `lint` Exit `0` (`0` errors), full `test` (`5355` tests / `708` suites: `5351` passed, `0` failed, `4` pre-existing OS/fs skips), `build` Exit `0`, `smoke` Exit `0` + standalone leak check (`0` leaked auth/credential/env/data files).
+  - Gate Verdicts: `reviewer_1` APPROVE, `reviewer_2` APPROVE, `challenger_1` APPROVE, `challenger_2` APPROVE, `teamwork_auditor` CLEAN (**PASS 5/5**).
+- **M2 (Safe Profile Migration Tooling — R2) — DONE & VERIFIED (`e2be1f6`)**:
+  - Targeted tests (`177/177` across `37` suites / `11` files), `typecheck` Exit `0`, `lint` Exit `0`, live Node 26 CLI smoke (`export` -> `dry-run` `0` bytes -> `apply` `11003` bytes -> repeat `apply` `0` bytes), Gate Verdicts **PASS 5/5**.
+  - Key deliverables: `src/core/contracts/migration.ts`, `src/server/migration.ts`, `scripts/migrate-profile.mjs`, `src/store/chats.ts`, `src/store/settings.ts`, `tests/migration.test.ts`, `tests/fixtures/synthetic-profile/legacy-windows/**`.
+- **M3 (Live Stream Handoff & Electron Remote Client — R3) — DONE & VERIFIED**:
+  - **Iteration 4 Gate Verdict — PASS 5/5**:
+    - `reviewer_m3_r4_1`: APPROVE (`507/507` 28-file suite)
+    - `reviewer_m3_r4_2`: APPROVE (`219/219` 8-file suite)
+    - `challenger_m3_r4_1`: APPROVE (`188/188` + Probes 1–4)
+    - `challenger_m3_r4_2`: APPROVE (`83/83` + Electron probes)
+    - `auditor_m3_r4`: CLEAN (2x cold `10/10` `tests/live-stream-handoff.test.ts` & `228/228` target suite)
+  - **Packaging Verification**: `electron-builder.yml` (`files: ["!**/*", "electron/**/*", "package.json"]`) covers all 5 new Electron remote/setup files (`package.json` unchanged).
+  - **Key M3 Deliverables (24 files)**:
+    - Server keepalive & stream handoff: `src/server/stream-keepalive.ts`, `src/server/pi/ui-stream.ts`, `src/server/side-chat.ts`, `src/server/chat-handler.ts`, `app/api/jobs/route.ts`, `app/api/chats/[id]/route.ts`, `app/api/chats/[id]/stream/route.ts`, `app/api/chats/[id]/side-chats/route.ts`, `app/api/chats/[id]/side-chats/[threadId]/route.ts`
+    - Client session resync: `components/chat.tsx`, `components/session-core.ts`, `components/session.ts`
+    - Isolated Electron remote client: `electron/remote-config.cjs`, `electron/preload-remote.cjs`, `electron/preload-setup.cjs`, `electron/setup.html`, `electron/remote-reconnect.html`, `electron/chatgpt-ipc.cjs`, `electron/main.cjs`
+    - Tests: `tests/live-stream-handoff.test.ts`, `tests/live-stream-handoff-ui.test.tsx`, `tests/side-chat-ping.test.tsx`, `tests/electron-remote.test.ts`, `tests/session-core.test.ts`
+- **E2E Testing Track (`M-E2E-1` & `M-E2E-2`) — Harness Gate PASS**:
+  - Isolated Playwright WebKit harness (`tests/e2e/**`) and synthetic fixtures (`tests/fixtures/e2e-synthetic/**`) with `167` Tiers 1–4 specs ready (kept unstaged until E2E execution checkpoint).
 
 ### 2. Still Running / Open (To Execute Next)
-- **M1 Remaining Verification & Gate (OPEN / STILL TO RUN)**:
-  - Re-run bounded `npm test` (`--test-concurrency=4`) and verify the 8 concurrency-timeout test files pass cleanly in Docker.
-  - Run the full **M1 Concurrent Verification Wave** (2 Reviewers, 2 Challengers, 1 Forensic Auditor — **not yet run**) and record M1 Gate PASS.
-- **E2E Track Remaining Work (OPEN / STILL TO RUN)**:
-  - Complete M-E2E-1 Iteration 7 Verification Wave (Reviewers 1 & 2, Challenger 2, Forensic Auditor) & Gate.
-  - Implement and verify M-E2E-2 (Tiers 2–4: 64 Tier 2, 16 Tier 3, 8 Tier 4, full iPad WebKit CSS-px viewport matrix, manual iPad/Windows checklist).
-  - Execute full live E2E run against landed M1–M5 code and publish `TEST_READY.md`.
-- **Remaining Implementation Milestones (OPEN / NOT STARTED)**:
-  - **M2**: Safe Profile Migration Tooling (R2) — exporter, `--dry-run`/`--apply` importer, SHA-256 attachment ingestion, Windows path/fileAccess reporting, idempotent JSONL merge, newer-server preservation.
-  - **M3**: Live Stream Keepalive/Resync Handoff & Electron Remote Client (R3) — SSE `: ping`, NDJSON `{"type":"ping"}\n`, `useServerResync`, `preload-remote.cjs` / `preload-setup.cjs`, Change Server URL, dynamic origin/CSP, local IPC isolation.
-  - **M4**: Chat/Question Attachments (`Ctrl+V`, PDF model delivery, MC & Free-Response previews) & Overhauled Drawing Pad (`Bild 3` -> `Bild 1`, `Karoraster`, colors, widths, undo/redo, independent `Light`/`Dark`/`App` paper theme, per-question draft, "Add to answer") (R5).
+- **Next Milestone — M4 (Attachments & Overhauled Drawing Pad — R5)**:
+  - `Ctrl+V` Windows screenshot paste, PDF model delivery, MC & Free-Response attachment previews, overhauled `plugins/drawing-pad` (`Bild 3` -> `Bild 1`, `Karoraster`, colors, widths, undo/redo, independent `Light`/`Dark`/`App` paper theme, per-question local draft, "Add to answer").
+- **Remaining Milestones**:
   - **M5**: iPadOS Safari / WebKit UI & Responsive Viewport Matrix (R4) — `viewport-fit=cover`, `safe-area-inset-*`, overlay drawer, `visualViewport` handling, `PracticeDock` draft fix, touch controls, Playwright WebKit matrix + manual checklist.
-  - **M6**: Final Integration Gate (Tiers 1–4 + Tier 5 adversarial coverage hardening) & R7 English docs (`docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`).
-- **Open Hardware / VM / User-Account Tests**:
-  - Isolated Windows VM tests: Electron desktop app launch, NSIS installer, auto-updater, remote URL first-run flow, real Windows `Ctrl+V` clipboard screenshot paste.
-  - Real iPadOS hardware tests: Safari virtual keyboard, Apple Pencil strokes/palm rejection, Photos/Files picker, Split View multitasking.
-  - Live headless LXC + Cloudflare Tunnel + real ChatGPT Plus OAuth login & real profile migration (to be triggered by user).
+  - **E2E Execution & M6**: Execute Tiers 1–4 against landed M2–M5 code + Tier 5 adversarial coverage hardening, full repo test run, standalone build, and R7 English docs (`docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`).
+- **Deferred Hardware / VM / User-Account Tests**:
+  - **Windows-VM Electron GUI / NSIS checks**: Electron desktop app launch, NSIS installer, auto-updater, remote URL first-run/reconnect GUI, and real Windows `Ctrl+V` clipboard screenshot paste.
+  - **Real iPad Safari checks**: Safari virtual keyboard, Apple Pencil strokes/palm rejection, Photos/Files picker, Split View multitasking.
+  - **Live LXC deployment checks**: systemd service + Cloudflare Tunnel + real ChatGPT Plus OAuth login & real profile migration (user-triggered).
 
 ---
 
-## Concrete Next Step to Resume Tomorrow
-Run in exact order (inside `c:\Users\User\Desktop\LearnHarness\repo` on branch `feat/lxc-server-ipad-draw-migration`; **never** run `node`/`npm` on Windows host):
+## Concrete Next Step
+Run on branch `feat/lxc-server-ipad-draw-migration` inside `c:\Users\User\Desktop\LearnHarness\repo` (**never** run `node`/`npm`/Electron on Windows host):
 
-1. **Ensure Docker Desktop is running**, verify clean branch:
-   ```powershell
-   Set-Location c:\Users\User\Desktop\LearnHarness\repo
-   git status
-   git branch --show-current   # must be feat/lxc-server-ipad-draw-migration
-   docker info --format "OSType={{.OSType}}"
-   ```
-2. **Finish M1 Verification & Gate**:
-   - Update `scripts/docker-test.sh` / run `npm test` with bounded concurrency (`--test-concurrency=4`) inside `learnharness-test:node26` and confirm 100% pass across all 708 suites, plus re-confirm `typecheck`, `lint`, `build`, and `smoke`.
-   - Dispatch **M1 Concurrent Verification Wave** (2 Reviewers, 2 Challengers, 1 Forensic Auditor) on the committed M1 implementation; resolve any findings until M1 Gate = **PASS**.
-3. **Complete M-E2E-1 Verification Wave** in `tests/e2e/` (`./tests/e2e/run-docker-e2e.sh --selfcheck`, `--tier1`) and advance to **M-E2E-2** (Tiers 2–4).
-4. **Proceed sequentially per dependency graph**:
-   - **M2** (Migration) and **M3** (Stream Handoff + Electron Remote) in parallel once M1 Gate passes ->
-   - **M4** (Attachments + Drawing Pad) ->
-   - **M5** (iPadOS WebKit Responsive + Viewport Matrix) ->
-   - **M6** (Full E2E Tiers 1–4 + Tier 5 Adversarial Hardening + R7 English Docs `docs/setup-and-operation.md` & `docs/developer-handover.md`).
+1. **Proceed with M4 (Attachments & Overhauled Drawing Pad — R5)**, validating targeted tests, `typecheck`, and `lint` in `learnharness-test:node26` via `.\scripts\docker-test.ps1`.
+2. **Proceed to M5 (iPadOS Safari / WebKit UI & Viewport Matrix — R4)** and then **M6** (full repo test suite, standalone build, full E2E Tiers 1–4 + Tier 5 adversarial gate in Docker WebKit, and R7 English docs).
 
 ---
 
@@ -102,10 +84,10 @@ Run in exact order (inside `c:\Users\User\Desktop\LearnHarness\repo` on branch `
 
 | # | Name | Dependencies | Status |
 |---|------|-------------|--------|
-| E2E | E2E Testing Track (Parallel) | M1 interfaces | IN_PROGRESS (M-E2E-1 Iter 7 wave paused; Tiers 2–4 & `TEST_READY.md` open) |
-| M1 | Docker Baseline, Shared Contracts, Auth, LXC/Proxy & ChatGPT Catalog | none | IMPLEMENTATION_COMPLETE / VERIFICATION_PAUSED (F1–F5 implemented; `typecheck`/`lint`/`build`/`smoke` passed; bounded `npm test` & Verification Wave/Auditor open) |
-| M2 | Safe Profile Migration Tooling | M1 | PLANNED |
-| M3 | Live Stream Handoff & Electron Remote Client | M1 | PLANNED |
-| M4 | Attachments (`Ctrl+V`/PDF/Photos) & Overhauled Drawing Pad | M1, M3 | PLANNED |
+| E2E | E2E Testing Track (Parallel) | M1 interfaces | HARNESS_READY (`167` Tiers 1–4 specs unstaged under `tests/e2e/**`; full run at M6) |
+| M1 | Docker Baseline, Shared Contracts, Auth, LXC/Proxy & ChatGPT Catalog | none | DONE & VERIFIED (`29fbecc`, Gate PASS 5/5) |
+| M2 | Safe Profile Migration Tooling | M1 | DONE & VERIFIED (`e2be1f6`, Gate PASS 5/5) |
+| M3 | Live Stream Handoff & Electron Remote Client | M1 | DONE & VERIFIED (Gate PASS 5/5) |
+| M4 | Attachments (`Ctrl+V`/PDF/Photos) & Overhauled Drawing Pad | M1, M3 | NEXT / PLANNED |
 | M5 | iPadOS Safari / WebKit UI & Viewport Matrix | M1, M3, M4 | PLANNED |
 | M6 | Final Integration Gate (Tiers 1–4 + Tier 5) & R7 Docs | M1–M5, E2E | PLANNED |

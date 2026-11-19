@@ -130,6 +130,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	const stop = useCallback(() => model.stop(), [model]);
 	const clearError = useCallback(() => model.clearError(), [model]);
 	const resumeStream = useCallback(() => void model.resumeStream(), [model]);
+	const getLastStreamActivityAt = useCallback(() => model.lastStreamActivityAt, [model]);
 
 	return {
 		messages: state.messages,
@@ -162,6 +163,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		stop,
 		clearError,
 		resumeStream,
+		getLastStreamActivityAt,
 		setReattachSettled,
 	};
 }

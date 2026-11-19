@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-igxdpxEFU3THXNPAaXo/vM0c3W4R1s8+HJuFvwT1vow='; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none';">
+	<title>LearnHarness Server Unreachable</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			--bg: #141414;
+			--surface: #1d1d1d;
+			--border: #303030;
+			--text: #ededed;
+			--muted: #a1a1aa;
+			--accent: #e5e5e5;
+			--accent-ink: #141414;
+			--error: #f87171;
+		}
+		* { box-sizing: border-box; }
+		html, body {
+			margin: 0;
+			height: 100%;
+			background: var(--bg);
+			color: var(--text);
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+		}
+		body {
+			display: flex;
+			flex-direction: column;
+		}
+		.drag-bar {
+			height: 44px;
+			-webkit-app-region: drag;
+			flex-shrink: 0;
+		}
+		main {
+			flex: 1;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 24px;
+		}
+		.card {
+			width: 100%;
+			max-width: 440px;
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: 14px;
+			padding: 28px;
+		}
+		h1 {
+			margin: 0 0 8px;
+			font-size: 20px;
+			font-weight: 600;
+		}
+		p {
+			margin: 0 0 14px;
+			font-size: 14px;
+			line-height: 1.5;
+			color: var(--muted);
+		}
+		.server-origin {
+			font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+			font-size: 13px;
+			color: var(--text);
+			background: var(--bg);
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			padding: 8px 10px;
+			margin-bottom: 12px;
+			word-break: break-all;
+		}
+		.error {
+			font-size: 13px;
+			color: var(--error);
+			min-height: 18px;
+			margin-bottom: 18px;
+		}
+		.actions {
+			display: flex;
+			gap: 10px;
+			justify-content: flex-end;
+			flex-wrap: wrap;
+		}
+		button {
+			padding: 9px 16px;
+			border-radius: 8px;
+			font-size: 14px;
+			font-weight: 500;
+			cursor: pointer;
+			border: 1px solid var(--border);
+			background: transparent;
+			color: var(--text);
+		}
+		button.primary {
+			background: var(--accent);
+			color: var(--accent-ink);
+			border-color: var(--accent);
+		}
+		button:disabled {
+			opacity: 0.6;
+			cursor: default;
+		}
+	</style>
+</head>
+<body>
+	<div class="drag-bar"></div>
+	<main>
+		<section class="card" aria-labelledby="reconnect-heading">
+			<h1 id="reconnect-heading">Could not reach your LearnHarness server</h1>
+			<p>Check your connection or server status, then try reconnecting or choose a different server URL.</p>
+			<div id="server-origin" class="server-origin" hidden></div>
+			<div id="error-text" class="error" role="alert" aria-live="polite"></div>
+			<div class="actions">
+				<button id="change-server-btn" type="button">Change Server URL</button>
+				<button id="reconnect-btn" type="button" class="primary">Reconnect</button>
+			</div>
+		</section>
+	</main>
+	<script>
+(() => {
+	const originEl = document.getElementById("server-origin");
+	const errorEl = document.getElementById("error-text");
+	const reconnectBtn = document.getElementById("reconnect-btn");
+	const changeBtn = document.getElementById("change-server-btn");
+	const bridge = window.lhSetup;
+
+	function setError(message) {
+		errorEl.textContent = message || "";
+	}
+
+	async function hydrate() {
+		if (!bridge) return;
+		try {
+			const state = await bridge.getState();
+			if (state && typeof state.serverUrl === "string" && state.serverUrl) {
+				originEl.textContent = state.serverUrl;
+				originEl.hidden = false;
+			}
+			const errMsg = state && (
+				typeof state.lastError === "string" && state.lastError
+					? state.lastError
+					: typeof state.error === "string" && state.error
+						? state.error
+						: ""
+			);
+			if (errMsg) {
+				setError(errMsg);
+			}
+		} catch (err) {
+			setError(err && err.message ? err.message : "Could not read connection state.");
+		}
+	}
+
+	reconnectBtn.addEventListener("click", async () => {
+		if (!bridge) return;
+		setError("");
+		reconnectBtn.disabled = true;
+		reconnectBtn.textContent = "Reconnecting…";
+		try {
+			const result = await bridge.reconnect();
+			if (result && result.ok === false) {
+				setError(result.error || "Server is still unreachable.");
+			}
+		} catch (err) {
+			setError(err && err.message ? err.message : "Server is still unreachable.");
+		} finally {
+			reconnectBtn.disabled = false;
+			reconnectBtn.textContent = "Reconnect";
+		}
+	});
+
+	changeBtn.addEventListener("click", () => {
+		if (bridge && typeof bridge.openSetup === "function") {
+			void bridge.openSetup();
+		}
+	});
+
+	void hydrate();
+})();
+	</script>
+</body>
+</html>

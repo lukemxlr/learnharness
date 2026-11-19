@@ -1,23 +1,25 @@
 import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
 import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
 	let chat = getChat(id);
-	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+	if (!chat) return Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
 	let questionResolver: QuestionTypeResolver | undefined;
 	if (pendingPluginQuestionOf(chat.messages)) {
 		try { questionResolver = await getPluginQuestionTypeResolver(); } catch { /* unavailable fallback */ }
 		// No awaited plugin startup may separate this read from the response projection.
 		chat = getChat(id);
-		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+		if (!chat) return Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
 	}
 	let problemResolver: ProblemTypeResolver | undefined;
 	if (activeProblemOf(chat.messages)?.pluginProblem) {
 		try { problemResolver = (await getPluginHost()).resolveProblemType; } catch { /* unavailable fallback */ }
 		chat = getChat(id);
-		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+		if (!chat) return Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
 	}
 	// turnInFlight lets a returning client re-attach to a running turn
 	// (chat-handler write-ahead + registry — see src/server/turn-liveness.ts).
@@ -42,7 +44,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 		turnError: turnFailure(id),
 		compacting: compactionInFlight(id),
 		coverage: sessionCoverage(id),
-	});
+	}, { headers: { "Cache-Control": "no-store" } });
 }
 
 /**

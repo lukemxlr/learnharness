@@ -22,10 +22,12 @@ import { effectiveSettings, stores } from "./stores.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { refreshConnectionCatalog } from "./model-catalog.ts";
 import { awaitCompaction } from "./compaction.ts";
+import { resolveStreamKeepaliveMs } from "./stream-keepalive.ts";
 
 export type SideStreamEvent =
 	| { type: "thread"; thread: SideChatThread }
 	| { type: "text"; text: string }
+	| { type: "ping" }
 	| { type: "done"; thread: SideChatThread }
 	| { type: "error"; error: string };
 type SideEngine = PiEngine & { sideUsageAdmitted?: () => boolean };
@@ -34,6 +36,7 @@ export interface SideChatDeps {
 	engineFor: (record: ChatRecord) => Promise<SideEngine | Response>;
 	instructions: () => string;
 	beforeAsk?: (chatId: string) => Promise<void>;
+	heartbeatMs?: number;
 }
 interface SideRun {
 	controller: AbortController;
@@ -77,13 +80,25 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 
 	function responseFor(chatId: string, thread: SideChatThread, run?: SideRun): Response {
 		let detach = () => {};
+		const heartbeatMs = deps.heartbeatMs ?? resolveStreamKeepaliveMs();
 		const body = new ReadableStream<Uint8Array>({
 			start(stream) {
 				let closed = false;
+				let heartbeat: ReturnType<typeof setInterval> | undefined;
+				const stopHeartbeat = () => {
+					if (heartbeat !== undefined) {
+						clearInterval(heartbeat);
+						heartbeat = undefined;
+					}
+				};
 				const write = (event: SideStreamEvent) => {
-					if (!closed) { try { stream.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); } catch { closed = true; } }
+					if (!closed) {
+						try { stream.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); }
+						catch { closed = true; stopHeartbeat(); }
+					}
 				};
 				const close = () => {
+					stopHeartbeat();
 					if (closed) return;
 					closed = true;
 					try { stream.close(); } catch { /* detached view */ }
@@ -96,7 +111,14 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 				if (!run) { write({ type: "done", thread }); close(); return; }
 				write({ type: "text", text: run.text });
 				run.listeners.add(listener);
-				detach = () => { closed = true; run.listeners.delete(listener); };
+				detach = () => { closed = true; stopHeartbeat(); run.listeners.delete(listener); };
+				if (!closed && heartbeatMs > 0) {
+					heartbeat = setInterval(() => {
+						if (closed) { stopHeartbeat(); return; }
+						write({ type: "ping" });
+					}, heartbeatMs);
+					(heartbeat as { unref?: () => void }).unref?.();
+				}
 				void run.settled.then(() => {
 					if (closed) return;
 					const latest = deps.chatStore.getChat(chatId)?.sideChats?.find((entry) => entry.id === thread.id);
@@ -107,7 +129,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			},
 			cancel() { detach(); }, // closing/reloading a view does not kill the call
 		});
-		return new Response(body, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-transform" } });
+		return new Response(body, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" } });
 	}
 
 	function watch(chatId: string, threadId: string): Response {
