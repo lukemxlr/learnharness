@@ -271,7 +271,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	};
 
 	return (
-		<div ref={containerRef} className="relative flex items-center gap-1.5" data-testid="model-control">
+		<div ref={containerRef} className="relative flex min-w-0 max-w-full items-center gap-1.5" data-testid="model-control">
 			<Hint
 				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}` : "Model selector"}
 				action="open-model-picker"
@@ -309,9 +309,9 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 					anchorRef={containerRef}
 					testid="model-menu" onClose={() => { setOpen(null); return "closed"; }}
 					preferredSide="up"
-					menuClass="flex w-[22rem] flex-col rounded-xl border bg-card p-2 text-xs shadow-xl"
+					menuClass="flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-xl border bg-card p-2 text-xs shadow-xl"
 				>
-					{error && <div className="mb-1.5 text-destructive">{error}</div>}
+					{error && <div className="mb-1.5 shrink-0 text-destructive">{error}</div>}
 					<ModelMenuList
 						models={catalog?.models}
 						effectiveId={effectiveId}
@@ -333,7 +333,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 					anchorRef={containerRef}
 					testid="thinking-menu" onClose={() => { setOpen(null); return "closed"; }}
 					preferredSide="up"
-					menuClass="flex w-44 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
+					menuClass="flex w-[min(11rem,calc(100vw-1rem))] flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
 				>
 					<ThinkingMenuList
 						levels={catalog ? levels : []}

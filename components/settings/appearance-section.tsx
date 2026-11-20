@@ -363,7 +363,7 @@ export function AppearanceSection({
 							anchorTestid="font-trigger"
 							testid="font-menu"
 							onClose={() => { setFontMenuOpen(false); return "closed"; }}
-							menuClass="flex w-[18rem] flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+							menuClass="flex w-[min(18rem,calc(100vw-1rem))] flex-col gap-0.5 overflow-hidden rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 						>
 							<FontMenuList
 								families={localFonts === undefined ? undefined : (localFonts ?? [...CURATED_FALLBACK_FONTS])}

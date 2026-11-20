@@ -222,7 +222,7 @@ function KeyTableRow({
 						data-testid={`${testid}-input`}
 						disabled={busy}
 						autoFocus
-						className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+						className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50 max-lg:h-10"
 					/>
 					<button
 						type="button"
@@ -345,7 +345,7 @@ function AddProviderRow({
 					testid="add-provider-menu"
 					onClose={() => { setOpen(false); return "closed"; }}
 					preferredSide="down"
-					menuClass="flex w-72 flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+					menuClass="flex w-[min(18rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 				>
 					{/* Close on pick (owner, fix wave): a chosen provider ends
 					    the dropdown — the paste row is the next step. */}
@@ -685,7 +685,7 @@ function AddProviderEditor({
 				aria-label={`${provider.label} key`}
 				data-testid={`key-${provider.id}-input`}
 				autoFocus={active}
-				className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+				className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50 max-lg:h-10"
 			/>
 			<button
 				type="button"
@@ -939,7 +939,7 @@ function CustomEndpointEditor({
 					data-testid="custom-baseurl-input"
 					disabled={busy}
 					autoFocus={active}
-					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50 max-lg:h-10"
 				/>
 			</div>
 			<input
@@ -950,7 +950,7 @@ function CustomEndpointEditor({
 				aria-label="Custom endpoint model IDs"
 				data-testid="custom-models-input"
 				disabled={busy}
-				className="h-7 min-w-0 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+				className="h-7 min-w-0 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50 max-lg:h-10"
 			/>
 			<label className="flex items-center gap-2 text-xs">Authentication
 				<select aria-label="Custom endpoint authentication" data-testid="custom-auth-mode" value={authMode} disabled={busy || pinsBusy} onChange={(e) => { setAuthMode(e.target.value as "keyless" | "apiKey"); setReuseKey(false); }}>
@@ -972,7 +972,7 @@ function CustomEndpointEditor({
 					aria-label="Custom endpoint API key"
 					data-testid="custom-key-input"
 					disabled={busy || pinsBusy || keySource === "env"}
-					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+					className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50 max-lg:h-10"
 				/>}
 				<button
 					type="button"

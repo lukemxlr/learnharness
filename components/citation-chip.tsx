@@ -90,7 +90,7 @@ export function CitationChip({ citation, variant, contentEditable, source }: Cit
 				</button>
 			) : null}
 			{cardOpen ? (
-				<MenuShell anchorRef={labelRef} onClose={() => { setCardOpen(false); return "closed"; }} testid="citation-quote-card" preferredSide="up" align="left" menuClass="w-80 rounded-xl border bg-popover p-3 text-sm shadow-xl">
+				<MenuShell anchorRef={labelRef} onClose={() => { setCardOpen(false); return "closed"; }} testid="citation-quote-card" preferredSide="up" align="left" menuClass="w-[min(20rem,calc(100vw-1rem))] rounded-xl border bg-popover p-3 text-sm shadow-xl">
 					<div ref={cardRef}>
 						<CitationQuoteCard citation={citation} onOpenSource={() => { setCardOpen(false); if (labelRef.current) openSource(labelRef.current); }} />
 					</div>

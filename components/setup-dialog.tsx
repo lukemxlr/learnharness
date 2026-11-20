@@ -187,7 +187,7 @@ export function SetupKeysBody({
 							onClose={() => { onCloseMenu?.(); return "closed"; }}
 							preferredSide="down"
 							align="left"
-							menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+							menuClass="flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 						>
 							<ProviderMenuList providers={providers ?? []} onPick={onPick} />
 						</MenuShell>
@@ -208,14 +208,14 @@ export function SetupKeysBody({
 								data-testid="setup-key-input"
 								disabled={saving}
 								autoFocus
-								className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+								className="h-7 max-lg:h-11 [@media(pointer:coarse)]:h-11 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs max-lg:text-[16px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
 							/>
 							<button
 								type="button"
 								onClick={onSave}
 								disabled={saving || !value.trim()}
 								data-testid="setup-key-save"
-								className="shrink-0 rounded-sm border border-border bg-background px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
+								className="min-h-11 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 shrink-0 rounded-sm border border-border bg-background px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
 							>
 								{saving ? "Saving…" : "Save key"}
 							</button>
@@ -523,7 +523,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 													onClose={() => { setOpenMenu(null); return "closed"; }}
 													preferredSide="down"
 													align="left"
-													menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+													menuClass="flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 												>
 													<ModelMenuList
 														models={slotCatalog}

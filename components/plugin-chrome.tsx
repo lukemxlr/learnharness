@@ -62,15 +62,15 @@ function ActionButton({ item, context, captureContext, className, iconOnly = fal
 			className={`${className} disabled:pointer-events-none disabled:opacity-40`}
 			onClick={() => { void manager?.runAction(item.pluginId, item.action, () => { const captured = captureContext ? captureContext() : context; if (captured) onRun?.(); return captured; }); }}>
 			<ActionIcon action={item.action} />
-			{!iconOnly && <span className="min-w-0 truncate">{item.action.name}</span>}
+			{!iconOnly && <span className={`min-w-0 truncate${!menuItem && context.placement === "top-bar" ? " max-[420px]:sr-only" : ""}`}>{item.action.name}</span>}
 		</button>
 	</Hint>;
 }
 
 const SIDEBAR_CONTEXT = { placement: "sidebar", surface: "sidebar" } as const;
 const GRAPH_CONTEXT = { placement: "graph", surface: "graph" } as const;
-const SIDEBAR_BUTTON = "flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
-const TOP_BUTTON = "flex min-h-11 min-w-11 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+const SIDEBAR_BUTTON = "flex min-h-11 min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+const TOP_BUTTON = "flex min-h-11 min-w-11 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground max-[420px]:justify-center max-[420px]:px-0";
 
 /** Core teaching/practice children lead the same row-major grid as placed actions. */
 export function PluginSidebarActions({ children }: { children: ReactNode }) {
@@ -93,7 +93,7 @@ export function PluginGraphActions() {
 	return <div data-testid="plugin-graph-actions" aria-label="Plugin graph actions"
 		className={`lh-plugin-scroll lh-no-drag pointer-events-none absolute bottom-0 left-0 z-10 flex w-[3.25rem] flex-col gap-2 overflow-y-auto p-2 ${open ? "top-0" : "lh-plugin-graph-closed top-11"}`}>
 		{actions.map(item => <ActionButton key={item.key} item={item} context={GRAPH_CONTEXT} iconOnly
-			className="pointer-events-auto flex size-9 shrink-0 items-center justify-center rounded-xl border bg-card/85 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground" />)}
+			className="pointer-events-auto flex size-9 shrink-0 items-center justify-center rounded-xl border bg-card/85 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-11" />)}
 	</div>;
 }
 
@@ -157,10 +157,11 @@ export function PluginTopBarActions({ context, captureContext }: { context: Extr
 				const width = Number(css.flexGrow) > 0 ? parseFloat(css.minWidth) || 0 : sibling.getBoundingClientRect().width;
 				available -= width + (parseFloat(css.marginLeft) || 0) + (parseFloat(css.marginRight) || 0);
 			}
-			// Long titles may truncate, but never take the only overflow trigger's slot.
-			if (title) available -= Math.min(title.scrollWidth, Math.max(0, available - 36));
 			const widths = Array.from(probes.current!.children).map(child => child.getBoundingClientRect().width);
-			setVisible(fitPluginTopBarActions(widths, Math.max(36, available)));
+			// Long titles may truncate, but never take the only overflow trigger's (or single compact action's) slot.
+			const reserveSlot = widths.length === 1 && (widths[0]! <= 52 || (header.clientWidth >= 421 && widths[0]! <= 76)) ? widths[0]! : 36;
+			if (title) available -= Math.min(title.scrollWidth, Math.max(0, available - reserveSlot));
+			setVisible(fitPluginTopBarActions(widths, Math.max(reserveSlot, available)));
 		};
 		measure();
 		const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
@@ -191,17 +192,17 @@ export function PluginTopBarActions({ context, captureContext }: { context: Extr
 	return <div ref={root} data-testid="plugin-top-bar-actions" className="lh-no-drag relative flex shrink-0 items-center gap-1">
 		{/* Off-flow intrinsic probes never create focus targets or drag-mask holes. */}
 		<div ref={probes} aria-hidden="true" className="pointer-events-none invisible fixed left-0 top-0 flex w-max gap-1">
-			{actions.map(item => <span key={item.key} className={TOP_BUTTON}><ActionIcon action={item.action} /><span className="min-w-0 truncate">{item.action.name}</span></span>)}
+			{actions.map(item => <span key={item.key} className={TOP_BUTTON}><ActionIcon action={item.action} /><span className="min-w-0 truncate max-[420px]:sr-only">{item.action.name}</span></span>)}
 		</div>
 		{actions.slice(0, count).map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} className={TOP_BUTTON} />)}
 		{excess.length > 0 && <Hint label="More plugin actions" side="bottom"><button ref={trigger} type="button" title="More plugin actions" aria-label="More plugin actions"
 			aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}
-			className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><EllipsisIcon className="size-4" /></button></Hint>}
+			className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [@media(pointer:coarse)]:size-11"><EllipsisIcon className="size-4" /></button></Hint>}
 		{menuOpen && excess.length > 0 && <MenuShell anchorRef={trigger} testid="plugin-top-bar-menu" onClose={(reason) => { setMenuOpen(false); if (reason === "escape") trigger.current?.focus(); return "closed"; }} preferredSide="down" align="right"
-			menuClass="lh-no-drag w-64 rounded-xl border border-border bg-popover p-1 shadow-lg">
+			menuClass="lh-no-drag w-[min(16rem,calc(100vw-1rem))] rounded-xl border border-border bg-popover p-1 shadow-lg">
 			<div role="menu" aria-label="More plugin actions">
 			{excess.map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} menuItem onRun={() => setMenuOpen(false)}
-				className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground" />)}
+				className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground" />)}
 			</div>
 		</MenuShell>}
 	</div>;

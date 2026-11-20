@@ -94,11 +94,23 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		const target = event.target as Element | null;
 		gesture = event.button === 0 && !event.defaultPrevented && element.contains(target) && !target?.closest("button, [role=button]");
 	};
+	const pointerUp = (event: PointerEvent) => {
+		pointerDown = false;
+		if (!gesture || (event.pointerType === "mouse" && event.button !== 0)) return;
+		gesture = false;
+		schedule(event.detail >= 2 ? MULTI_CLICK_SETTLE_MS : 0, { x: event.clientX, y: event.clientY });
+	};
 	const mouseUp = (event: MouseEvent) => {
 		pointerDown = false;
 		if (!gesture || event.button !== 0) return;
 		gesture = false;
 		schedule(event.detail >= 2 ? MULTI_CLICK_SETTLE_MS : 0, { x: event.clientX, y: event.clientY });
+	};
+	const touchEnd = () => {
+		pointerDown = false;
+		if (!gesture) return;
+		gesture = false;
+		schedule(0, null);
 	};
 	const keyDown = (event: KeyboardEvent) => {
 		if (event.key === "Escape") { if (shown || timer !== undefined) dismiss("cancel"); return; }
@@ -117,7 +129,9 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	};
 
 	document.addEventListener("pointerdown", pointerDownCapture, true);
+	document.addEventListener("pointerup", pointerUp, true);
 	document.addEventListener("mouseup", mouseUp, true);
+	document.addEventListener("touchend", touchEnd, true);
 	document.addEventListener("keydown", keyDown, true);
 	document.addEventListener("focusin", focusIn, true);
 	element.addEventListener("contextmenu", contextMenu);
@@ -136,7 +150,9 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 			clearPending();
 			if (scrollTimer !== undefined) view.clearTimeout(scrollTimer);
 			document.removeEventListener("pointerdown", pointerDownCapture, true);
+			document.removeEventListener("pointerup", pointerUp, true);
 			document.removeEventListener("mouseup", mouseUp, true);
+			document.removeEventListener("touchend", touchEnd, true);
 			document.removeEventListener("keydown", keyDown, true);
 			document.removeEventListener("focusin", focusIn, true);
 			element.removeEventListener("contextmenu", contextMenu);

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { createPortal } from "react-dom";
 import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
 import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, type CloseOutcome, type CloseReason } from "./interaction-layers";
+import { readVisualViewport, subscribeVisualViewport } from "./visual-viewport";
 
 /**
  * THE shared menu shell (menu standardization, fix wave chunk B): one
@@ -62,6 +63,16 @@ export interface MenuPlacement {
 	side: MenuSide;
 	style: Record<string, string | number>;
 	maxHeight: number;
+	maxWidth?: number;
+}
+
+export interface MenuViewport {
+	width: number;
+	height: number;
+	offsetTop?: number;
+	offsetLeft?: number;
+	layoutWidth?: number;
+	layoutHeight?: number;
 }
 
 /** Pure: the placement decision — anchored rect + viewport + the menu's
@@ -69,16 +80,28 @@ export interface MenuPlacement {
  *  filter re-measure honestly) → side, fixed style, cap. Flip rule: stay
  *  on the preferred side unless it cannot show the full content AND the
  *  other side is roomier. The cap always keeps the menu inside its side's
- *  room when there is room; the floor keeps it usable when there isn't. */
+ *  room when there is room; the floor keeps it usable when there isn't.
+ *  When `menuWidth` or visualViewport offsets are supplied, horizontal
+ *  coordinates clamp inside `[EDGE, viewport.width - EDGE]`. */
 export function computeMenuPlacement(
 	rect: { top: number; bottom: number; left: number; right: number },
-	viewport: { width: number; height: number },
+	viewport: MenuViewport,
 	contentHeight: number,
 	preferredSide: MenuSide,
 	align: MenuAlign,
+	menuWidth?: number,
 ): MenuPlacement {
-	const availDown = viewport.height - EDGE - (rect.bottom + GAP);
-	const availUp = rect.top - GAP - EDGE;
+	const offsetTop = viewport.offsetTop ?? 0;
+	const offsetLeft = viewport.offsetLeft ?? 0;
+	const vpTop = offsetTop;
+	const vpBottom = offsetTop + viewport.height;
+	const vpLeft = offsetLeft;
+	const vpRight = offsetLeft + viewport.width;
+	const layoutWidth = viewport.layoutWidth ?? vpRight;
+	const layoutHeight = viewport.layoutHeight ?? vpBottom;
+
+	const availDown = vpBottom - EDGE - (rect.bottom + GAP);
+	const availUp = rect.top - GAP - (vpTop + EDGE);
 	// contentHeight ≤ 0 (nothing measured yet) keeps the preferred side —
 	// the hidden first pass re-measures and decides with real numbers.
 	let side = preferredSide;
@@ -91,11 +114,35 @@ export function computeMenuPlacement(
 	}
 	const avail = side === "down" ? availDown : availUp;
 	const maxHeight = Math.max(MIN_USABLE, Math.min(CAP_VH * viewport.height, avail));
-	const horizontal: Record<string, number> =
-		align === "right" ? { right: viewport.width - rect.right } : { left: rect.left };
+	const maxWidth = Math.max(0, viewport.width - 2 * EDGE);
+
+	let horizontal: Record<string, number>;
+	if (menuWidth !== undefined && menuWidth > 0) {
+		const effectiveWidth = Math.min(menuWidth, maxWidth);
+		if (align === "right") {
+			const minRight = Math.max(0, layoutWidth - vpRight) + EDGE;
+			const maxRight = Math.max(minRight, layoutWidth - vpLeft - EDGE - effectiveWidth);
+			const desiredRight = layoutWidth - rect.right;
+			horizontal = { right: Math.max(minRight, Math.min(desiredRight, maxRight)) };
+		} else {
+			const minLeft = vpLeft + EDGE;
+			const maxLeft = Math.max(minLeft, vpRight - EDGE - effectiveWidth);
+			horizontal = { left: Math.max(minLeft, Math.min(rect.left, maxLeft)) };
+		}
+	} else {
+		horizontal =
+			align === "right"
+				? { right: Math.max(EDGE, layoutWidth - rect.right) === layoutWidth - rect.right ? layoutWidth - rect.right : EDGE }
+				: { left: Math.max(vpLeft + EDGE, rect.left) === rect.left ? rect.left : vpLeft + EDGE };
+	}
+
 	const vertical: Record<string, number> =
-		side === "down" ? { top: rect.bottom + GAP } : { bottom: viewport.height - rect.top + GAP };
-	return { side, style: { ...horizontal, ...vertical }, maxHeight };
+		side === "down"
+			? { top: Math.max(vpTop + EDGE, rect.bottom + GAP) }
+			: { bottom: Math.max(Math.max(0, layoutHeight - vpBottom) + EDGE, layoutHeight - rect.top + GAP) };
+	return menuWidth !== undefined
+		? { side, style: { ...horizontal, ...vertical }, maxHeight, maxWidth }
+		: { side, style: { ...horizontal, ...vertical }, maxHeight };
 }
 
 type AnchorRect = { top: number; bottom: number; left: number; right: number };
@@ -221,20 +268,24 @@ export function MenuShell({
 	const getAnchorRectRef = useRef(getAnchorRect);
 	getAnchorRectRef.current = getAnchorRect;
 
-	// Measure + (re)place: on mount, then on every capture-phase scroll and
-	// resize (rAF-throttled). scrollHeight keeps the flip decision honest
-	// after the content changes shape (a search filtering the list).
+	// Measure + (re)place: on mount, then on every capture-phase scroll,
+	// window resize, and visualViewport resize/scroll (rAF-throttled).
 	useLayoutEffect(() => {
 		let raf = 0;
 		const place = () => {
 			const rect = menuAnchorRect({ getAnchorRect: getAnchorRectRef.current, anchorRef, anchorTestid }, document);
-			if (!rect || !menuRef.current) return;
+			const el = menuRef.current;
+			if (!rect || !el) return;
+			const vv = readVisualViewport(window);
+			const innerList = el.querySelector<HTMLElement>("ul");
+			const extraListHeight = innerList ? Math.max(0, Math.min(288, innerList.scrollHeight) - innerList.clientHeight) : 0;
 			const p = computeMenuPlacement(
 				rect,
-				{ width: window.innerWidth, height: window.innerHeight },
-				menuRef.current.scrollHeight,
+				vv,
+				el.scrollHeight + extraListHeight,
 				preferredSide,
 				align,
+				el.offsetWidth || el.getBoundingClientRect().width,
 			);
 			setPlaced(p);
 		};
@@ -244,11 +295,11 @@ export function MenuShell({
 			raf = requestAnimationFrame(place);
 		};
 		window.addEventListener("scroll", rePlace, true);
-		window.addEventListener("resize", rePlace);
+		const offVv = subscribeVisualViewport(window, rePlace);
 		return () => {
 			cancelAnimationFrame(raf);
 			window.removeEventListener("scroll", rePlace, true);
-			window.removeEventListener("resize", rePlace);
+			offVv();
 		};
 	}, [anchorRef, anchorTestid, preferredSide, align]);
 
@@ -277,7 +328,14 @@ export function MenuShell({
 			data-lh-menu=""
 			tabIndex={-1}
 			onKeyDown={onBodyKeyDown}
-			style={{ position: "fixed", zIndex: INTERACTION_LAYER_Z_BASE + layer.order, ...placed.style, maxHeight: placed.maxHeight, overflowY: "auto" }}
+			style={{
+				position: "fixed",
+				zIndex: INTERACTION_LAYER_Z_BASE + layer.order,
+				...placed.style,
+				maxHeight: placed.maxHeight,
+				...(placed.maxWidth !== undefined ? { maxWidth: placed.maxWidth } : {}),
+				overflowY: "auto",
+			}}
 			// The body is the arrow machine's focus home (input-less menus
 			// land focus here on open) — the focus STAYS, but the browser's
 			// default blue ring around it must not draw (owner, polish

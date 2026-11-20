@@ -14,6 +14,7 @@ import type { SelectionAction } from "./selection-toolbar";
 import type { SideThreadAnchor, SideThreadOpenArgs, SideThreadState } from "./use-side-thread";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { readVisualViewport, subscribeVisualViewport } from "./visual-viewport";
 
 /** Ask always opens the selected teaching segment's ONE conversation. Cite
  * is an independent action that inserts a chip into the main/thinking field. */
@@ -121,10 +122,10 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				<MessageCircleQuestion aria-hidden="true" className="size-3.5 text-muted-foreground" />
 				<span className="flex-1 font-ui text-xs text-muted-foreground">Side question</span>
 				<Button type="button" size="icon-xs" variant="ghost" aria-label={state.mode === "popover" ? "Dock side conversation" : "Float side conversation"}
-					title={state.mode === "popover" ? "Pin to side" : "Unpin to float"} onClick={state.mode === "popover" ? onExpand : onFloat}>
+					title={state.mode === "popover" ? "Pin to side" : "Unpin to float"} className="min-h-11 min-w-11 lg:min-h-0 lg:min-w-0 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11" onClick={state.mode === "popover" ? onExpand : onFloat}>
 					{state.mode === "popover" ? <Pin aria-hidden="true" /> : <PinOff aria-hidden="true" />}
 				</Button>
-				<Button type="button" size="icon-xs" variant="ghost" aria-label="Close side conversation" title="Close" onClick={onClose}><X aria-hidden="true" /></Button>
+				<Button type="button" size="icon-xs" variant="ghost" aria-label="Close side conversation" title="Close" className="min-h-11 min-w-11 lg:min-h-0 lg:min-w-0 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11" onClick={onClose}><X aria-hidden="true" /></Button>
 			</div>
 			<div ref={scrollRef} data-side-scroll="" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto font-prose">
 				{state.messages.map((message) => (
@@ -151,26 +152,26 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				{dictation?.error && <p role="alert" className="font-ui text-xs text-destructive">{dictation.error}</p>}
 				<div className="flex items-end gap-1.5">
 					<div data-testid="side-composer-surface" className="relative min-w-0 flex-1 rounded-[10px] border bg-card focus-within:border-primary/50">
-					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent pr-14 font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
+					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-11 resize-none border-0 bg-transparent pr-14 font-prose text-sm max-lg:text-[16px] shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
 						value={question} maxLength={SIDE_QUESTION_MAX_CHARS} placeholder={sideThreadPlaceholder(state)} onChange={(event) => changeDraft(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.nativeEvent.isComposing || !isInteractionScopeEligible(inputRef.current, controller)) return;
 							if (event.key === "Enter" && (!event.shiftKey || event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void submit(); }
 							else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
 						}} />
-					{dictation && <div className="absolute right-1 bottom-1 flex h-7 items-center gap-1">
+					{dictation && <div className="absolute right-0.5 bottom-0.5 flex h-10 items-center gap-1">
 						{dictation.phase === "recording" && <SideInputMeter levelRef={dictation.levelRef} />}
 						<button type="button" data-testid="side-dictation-toggle"
 						aria-label={dictation.active ? "Stop side dictation" : "Start side dictation"} aria-pressed={dictation.active}
 						title={dictation.error ?? (dictation.active ? "Stop side dictation" : "Dictate side question")}
 						disabled={dictation.blocked || dictation.phase === "stopping"} onClick={dictation.toggle}
-						className={`flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${dictation.active ? "bg-error/15 text-error" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
+						className={`flex size-9 min-h-10 min-w-10 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${dictation.active ? "bg-error/15 text-error" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
 						<Mic aria-hidden="true" className="size-3.5" />
 					</button></div>}
 					</div>
 					<button type="button" aria-label={state.answering ? "Stop side answer" : "Send side question"}
 						disabled={!state.answering && !question.trim() && !dictation?.active} onClick={state.answering ? onStop : () => void submit()}
-						className={`flex size-9 shrink-0 items-center justify-center rounded-[10px] transition-colors ${state.answering ? "bg-secondary text-foreground hover:bg-accent" : "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"}`}>
+						className={`flex size-11 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-[10px] transition-colors ${state.answering ? "bg-secondary text-foreground hover:bg-accent" : "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"}`}>
 						{state.answering ? <Square aria-hidden="true" className="size-4" /> : <CornerDownLeft aria-hidden="true" className="size-5" />}
 					</button>
 				</div>
@@ -189,7 +190,8 @@ function anchorRect(anchor: SideThreadAnchor, composer: () => HTMLElement | null
 }
 
 function sideThreadViewport(): SideThreadViewport {
-	const viewport: SideThreadViewport = { width: window.innerWidth, height: window.innerHeight };
+	const vv = readVisualViewport(window);
+	const viewport: SideThreadViewport = { width: vv.width, height: vv.offsetTop + vv.height };
 	const root = document.documentElement;
 	if (root.classList.contains("lh-electron") && root.dataset.lhPlatform === "darwin") {
 		const css = getComputedStyle(root);
@@ -249,8 +251,9 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 		if (boxRef.current) observer.observe(boxRef.current, { childList: true, subtree: true, characterData: true });
 		const chromeObserver = new MutationObserver(rePlace);
 		chromeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class", "data-lh-platform"] });
-		window.addEventListener("scroll", rePlace, true); window.addEventListener("resize", rePlace);
-		return () => { cancelAnimationFrame(raf); observer.disconnect(); chromeObserver.disconnect(); window.removeEventListener("scroll", rePlace, true); window.removeEventListener("resize", rePlace); };
+		window.addEventListener("scroll", rePlace, true);
+		const offVv = subscribeVisualViewport(window, rePlace);
+		return () => { cancelAnimationFrame(raf); observer.disconnect(); chromeObserver.disconnect(); window.removeEventListener("scroll", rePlace, true); offVv(); };
 	}, [composer]);
 	const placed = placement !== null;
 	useEffect(() => {
@@ -284,5 +287,5 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 	</div>;
 }
 export function SideThreadPanel({ children }: { children: ReactNode }) {
-	return <aside aria-label="Side question" data-testid="side-thread-panel" className="flex w-[22rem] shrink-0 flex-col border-l border-border bg-background p-3">{children}</aside>;
+	return <aside aria-label="Side question" data-testid="side-thread-panel" className="flex w-[22rem] max-lg:fixed max-lg:inset-y-0 max-lg:right-0 max-lg:z-50 max-lg:w-[min(22rem,calc(100vw-1rem))] max-lg:shadow-2xl shrink-0 flex-col border-l border-border bg-background p-3 pt-[max(0.75rem,var(--lh-safe-top))] pb-[max(0.75rem,var(--lh-safe-bottom))] pr-[max(0.75rem,var(--lh-safe-right))]">{children}</aside>;
 }

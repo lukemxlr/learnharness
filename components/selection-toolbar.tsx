@@ -7,6 +7,7 @@ import { Button } from "./ui/button";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { captureSelection, type CapturedSelection } from "./selection-text";
+import { readVisualViewport } from "./visual-viewport";
 import {
 	isSelectionRectVisible, observeSelectionActions, resolveSelectionActionPosition,
 	type RectLike, type SelectionActionPoint,
@@ -49,7 +50,7 @@ export function SelectionToolbarButtons({ capture, actions, onDone }: {
 						variant="outline"
 						disabled={disabled !== null}
 						aria-label={disabled ?? action.ariaLabel}
-						className="bg-popover shadow-md dark:bg-popover dark:hover:bg-accent"
+						className="bg-popover shadow-md dark:bg-popover dark:hover:bg-accent [@media(pointer:coarse)]:min-h-11 max-lg:min-h-11"
 						// Keep the learner's selection alive through the click.
 						onPointerDown={(event) => event.preventDefault()}
 						onClick={() => { if (runSelectionAction(action, capture)) onDone(); }}
@@ -111,13 +112,14 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 	const actionsRef = useRef(actions);
 	actionsRef.current = actions;
 
-	// Clamp inside the window once the real size is known, before paint.
+	// Clamp inside the visual viewport once the real size is known, before paint.
 	useLayoutEffect(() => {
 		const toolbar = toolbarRef.current;
 		if (!toolbar || !state) return;
 		const rect = toolbar.getBoundingClientRect();
-		toolbar.style.left = `${Math.max(8, Math.min(state.position.x, window.innerWidth - rect.width - 8))}px`;
-		toolbar.style.top = `${Math.max(8, Math.min(state.position.y, window.innerHeight - rect.height - 8))}px`;
+		const vv = readVisualViewport(window);
+		toolbar.style.left = `${Math.max(vv.offsetLeft + 8, Math.min(state.position.x, vv.offsetLeft + vv.width - rect.width - 8))}px`;
+		toolbar.style.top = `${Math.max(vv.offsetTop + 8, Math.min(state.position.y, vv.offsetTop + vv.height - rect.height - 8))}px`;
 	}, [state]);
 
 	useEffect(() => {
@@ -134,13 +136,14 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 			const lines = Array.from(capture.range.getClientRects());
 			const onText = pointer !== null && lines.some((line) =>
 				pointer.x >= line.left - 8 && pointer.x <= line.right + 8 && pointer.y >= line.top - 8 && pointer.y <= line.bottom + 8);
+			const vv = readVisualViewport(window);
 			setState({
 				capture,
 				position: resolveSelectionActionPosition({
 					bounds: viewportRect,
 					selectionRect: lines.at(-1) ?? capture.range.getBoundingClientRect(),
 					pointer: onText ? pointer : null,
-					viewport: { width: window.innerWidth, height: window.innerHeight },
+					viewport: { width: vv.offsetLeft + vv.width, height: vv.offsetTop + vv.height },
 				}),
 			});
 		};

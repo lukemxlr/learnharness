@@ -26,7 +26,7 @@ export function SettingsSection({
 	testid?: string;
 }) {
 	return (
-		<section data-testid={testid} className="px-6 py-5">
+		<section data-testid={testid} className="px-6 max-sm:px-3 py-5">
 			<h2 className="text-sm uppercase tracking-widest text-foreground">{title}</h2>
 			{hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
 			<div className="mt-4 flex flex-col gap-3">{children}</div>
@@ -71,7 +71,7 @@ export function SettingsRow({
 	dimmed?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("flex flex-wrap sm:flex-nowrap items-center justify-between gap-x-4 gap-y-2 py-1", dimmed && "opacity-40")}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
@@ -95,7 +95,7 @@ export function SettingsMenuTrigger({
 		{...props}
 		disabled={disabled}
 		className={cn(
-			"flex h-7 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors",
+			"flex h-7 [@media(pointer:coarse)]:min-h-11 max-md:min-h-11 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors",
 			disabled || unavailable ? "cursor-not-allowed" : "hover:border-muted-foreground/50",
 			className,
 		)}
@@ -194,7 +194,7 @@ export function ThinSelect({
 			disabled={disabled}
 			onChange={(e) => onChange(e.target.value)}
 			className={cn(
-				"h-7 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none",
+				"h-7 max-lg:h-11 [@media(pointer:coarse)]:h-11 rounded-sm border border-border bg-background px-1.5 font-ui text-xs max-lg:text-[16px] text-foreground outline-none",
 				disabled && "cursor-not-allowed",
 			)}
 		>
@@ -323,7 +323,7 @@ export function CommitInput({
 					e.currentTarget.blur();
 				}
 			}}
-			className="h-7 w-40 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60"
+			className="h-7 max-lg:h-11 [@media(pointer:coarse)]:h-11 w-40 max-w-full rounded-sm border border-border bg-background px-2 font-ui text-xs max-lg:text-[16px] text-foreground outline-none placeholder:text-muted-foreground/60"
 		/>
 	);
 }

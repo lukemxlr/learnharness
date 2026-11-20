@@ -108,8 +108,9 @@ export function PluginSurface({ pluginId, title, background = "dimmed", onClose,
 				style={{ zIndex: 100 + layer.order }}>
 			<div className="min-h-0 w-full flex-1 overflow-y-auto">{children}</div>
 			<button type="button" onClick={close} aria-label="Close" title="Close"
-				className="absolute right-2 top-2 z-10 size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-				<svg viewBox="0 0 16 16" className="mx-auto size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+				style={{ top: "max(0.3125rem, var(--lh-safe-top))", right: "max(0.375rem, var(--lh-safe-right))" }}
+				className="absolute right-2 top-2 z-10 flex size-11 min-h-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+				<svg viewBox="0 0 16 16" className="mx-auto size-4" fill="none" stroke="currentColor" strokeWidth="1.5">
 					<path d="M4 4l8 8M12 4l-8 8" />
 				</svg>
 			</button>

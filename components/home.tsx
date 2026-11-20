@@ -209,7 +209,7 @@ export function Home({
 			    OVER the graph (no gradient: the graph runs clean under it to the
 			    bottom edge). Matches chat.tsx's DOCK geometry (max-w-[46rem]
 			    px-4) so nothing shifts when a session starts (owner). */}
-			<div className="pointer-events-none absolute inset-x-0 bottom-0 pb-5">
+			<div className="pointer-events-none absolute inset-x-0 bottom-[var(--lh-vv-bottom-inset)] pb-[max(1.25rem,var(--lh-safe-bottom))] pl-[var(--lh-safe-left)] pr-[var(--lh-safe-right)]">
 				<div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-4">
 					{/* The pick bar (owner vision, 2026-10-04): the chain
 					    table's selection is PERSISTENT — picked
@@ -234,7 +234,7 @@ export function Home({
 									type="button"
 									data-testid="setup-cta"
 									onClick={() => setSetupOpen(true)}
-									className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
+									className="min-h-11 rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 								>
 									Set up your models
 								</button>
@@ -286,7 +286,7 @@ export function Home({
 						type="submit"
 						aria-label="Start session"
 						disabled={(!topic.trim() && !dictation.active) || busy}
-						className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
+						className="flex size-10 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
 					>
 						<CornerDownLeftIcon className="size-5" />
 					</button>
@@ -307,7 +307,7 @@ export function Home({
 										data-testid={`home-mode-${m}`}
 										onClick={() => setMode(m)}
 										className={
-											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
+											"flex min-h-10 lg:min-h-0 [@media(pointer:coarse)]:min-h-10 items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
 											(mode === m
 												? "bg-accent text-foreground"
 												: "text-muted-foreground hover:text-foreground")
@@ -328,7 +328,7 @@ export function Home({
 			{/* Floating host chrome stays outside page-content coverage, after
 			    the region at the same owned-surface rank. The drag mask remains
 			    first so later controls retain their Electron no-drag carve-outs. */}
-			<header style={chromeStyle} className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
+			<header style={chromeStyle} className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 pl-[max(0.75rem,var(--lh-safe-left))] pr-[max(0.75rem,var(--lh-safe-right))] pt-[max(0.5rem,var(--lh-safe-top))] pb-2">
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>

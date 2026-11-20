@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { sanitizeNextPath } from "@/src/core";
+import { useCanChangeServerUrl } from "@/components/remote-server";
 
 export function LoginForm({
 	nextPath,
@@ -14,6 +15,7 @@ export function LoginForm({
 	const [password, setPassword] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
+	const canChangeServerUrl = useCanChangeServerUrl();
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -40,7 +42,7 @@ export function LoginForm({
 	}
 
 	return (
-		<main className="flex min-h-dvh items-center justify-center bg-background px-4 py-8 text-foreground">
+		<main className="flex min-h-dvh items-center justify-center bg-background pl-[max(1rem,var(--lh-safe-left))] pr-[max(1rem,var(--lh-safe-right))] pt-[max(2rem,var(--lh-safe-top))] pb-[max(2rem,var(--lh-safe-bottom))] text-foreground">
 			<div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-lg">
 				<h1 className="font-title text-xl font-semibold tracking-tight text-foreground">
 					Sign in to LearnHarness
@@ -78,7 +80,7 @@ export function LoginForm({
 							onChange={(e) => setUsername(e.target.value)}
 							disabled={submitting}
 							data-testid="login-username"
-							className="min-h-[44px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring"
+							className="min-h-[44px] w-full rounded-md border border-border bg-background px-3 py-2 text-[16px] text-foreground outline-none focus:border-ring"
 						/>
 					</div>
 
@@ -96,7 +98,7 @@ export function LoginForm({
 							onChange={(e) => setPassword(e.target.value)}
 							disabled={submitting}
 							data-testid="login-password"
-							className="min-h-[44px] w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring"
+							className="min-h-[44px] w-full rounded-md border border-border bg-background px-3 py-2 text-[16px] text-foreground outline-none focus:border-ring"
 						/>
 					</div>
 
@@ -114,6 +116,19 @@ export function LoginForm({
 					>
 						{submitting ? "Signing in…" : "Sign in"}
 					</button>
+
+					{canChangeServerUrl && (
+						<button
+							type="button"
+							data-testid="change-server-url"
+							onClick={() => {
+								void window.lh?.changeServerUrl?.();
+							}}
+							className="min-h-11 w-full cursor-pointer rounded-md border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+						>
+							Change Server URL
+						</button>
+					)}
 				</form>
 
 				<p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">

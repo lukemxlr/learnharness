@@ -136,22 +136,20 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 	/* ── the collapsed bar ── */
 	const bar = (
 			<button
-				ref={element => { if (!customInput) rootRef.current = element; }}
 				type="button"
 				data-testid="practice-dock-bar"
 				onClick={onExpand}
-				className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+				className="flex min-h-11 w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
 			>
 				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
 				<span className="font-medium">Problem</span>
 				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
 			</button>
 		);
-	if (!expanded && !customInput) return bar;
 
 	const handlePasteFiles = onUploadFiles ? (files: File[]) => { onUploadFiles(files); } : undefined;
 
-	/* ── the expanded form ── */
+	/* ── the expanded form (stays mounted while collapsed so nativeThinking survives!) ── */
 	return (
 		<div
 			ref={element => { rootRef.current = element; }}
@@ -168,7 +166,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 			}}
 		>
 			{!expanded && bar}
-			<div hidden={!expanded}>
+			<div hidden={!expanded} className={expanded ? undefined : "invisible h-0 overflow-hidden"}>
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
 			    cards' label row — owner round, 2026-10-05) + the statement,
 			    markdown + LaTeX rendered, capped by the measured column
@@ -257,7 +255,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 					>
 						<ImagePlusIcon className="size-4" />
 					</button>
-					<span aria-hidden className="pl-1 text-xs text-muted-foreground">
+					<span aria-hidden className={cn("pl-1 text-xs text-muted-foreground", !compactionRunning && "hidden sm:inline")}>
 						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
 					</span>
 					<Button

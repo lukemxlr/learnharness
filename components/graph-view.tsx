@@ -68,7 +68,7 @@ import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImpo
 import { PluginGraphActions } from "@/components/plugin-chrome";
 import { SettingsSlider as SettingSlider } from "@/components/settings/controls";
 import Link from "next/link";
-import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
+import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, Trash2Icon, WaypointsIcon } from "lucide-react";
 import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { CLUSTER_LIGHTNESS, GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
@@ -850,7 +850,7 @@ export function GraphChromeRow({
 							placeholder="Search nodes…"
 							aria-label="Search nodes"
 							spellCheck={false}
-							className="h-7 w-full rounded-lg border bg-background pl-8 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
+							className="h-7 w-full rounded-lg border bg-background pl-8 text-xs outline-none placeholder:text-muted-foreground focus:border-ring max-lg:h-9 max-lg:text-[16px]"
 						/>
 					</div>
 					</Hint>
@@ -1662,6 +1662,17 @@ export function GraphView({
 					) : (
 						<div className="mt-3 text-xs text-muted-foreground">No sessions recorded.</div>
 					)}
+					<div className="mt-3 border-t border-border/60 pt-2">
+						<button
+							type="button"
+							data-testid="node-card-delete"
+							onClick={() => setDeletingNode({ id: selected.node.id, name: selected.node.name })}
+							className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+						>
+							<Trash2Icon className="size-3.5 shrink-0" />
+							Delete node…
+						</button>
+					</div>
 				</div>
 			)}
 			{/* The chain table overlay (chains-overlay plan, 2026-09-29):

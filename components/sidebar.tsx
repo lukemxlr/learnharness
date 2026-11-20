@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, EllipsisIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -56,17 +56,23 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import { useVisualViewport } from "@/components/visual-viewport";
 const SIDEBAR_AUTOCLOSE = 928;
+const DRAWER_BREAKPOINT = 1024;
 
 // Module scope, guarded for SSR (the server has no navigator).
 const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
 
 declare global {
 	interface Window {
-		/** Preload bridge (electron/preload.cjs) — Electron only, absent in the browser. */
+		/** Preload bridge (electron/preload.cjs / preload-remote.cjs) — Electron only, absent in the browser. */
 		lh?: {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
+			/** True when running inside the remote-server Electron wrapper (preload-remote.cjs). */
+			isRemoteMode?: boolean;
+			/** Opens the remote server connection setup screen in remote Electron mode. */
+			changeServerUrl?: () => Promise<unknown>;
 			/** Resolve an OS-backed File without copying/uploading its contents. */
 			getPathForFile?: (file: File) => string;
 			/** Choose one original directory path, without reading its contents. */
@@ -94,9 +100,16 @@ declare global {
 	}
 }
 
-const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+const SidebarContext = createContext<{
+	open: boolean;
+	isDrawer: boolean;
+	toggle: () => void;
+	closeDrawer: () => void;
+}>({
 	open: false,
+	isDrawer: false,
 	toggle: () => {},
+	closeDrawer: () => {},
 });
 
 export function useSidebar() {
@@ -104,6 +117,7 @@ export function useSidebar() {
 }
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
+	useVisualViewport(true);
 	const hub = useNotifyHub();
 	useEffect(() => {
 		const bridge = window.lh?.chatgpt;
@@ -122,8 +136,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [hub]);
 	// Start closed so server and client first-render agree (no hydration
 	// mismatch); the stored value is applied after mount.
-	const [open, setOpen] = useState(false);
+	const [desktopOpen, setDesktopOpen] = useState(false);
+	const [drawerOpen, setDrawerOpen] = useState(false);
 	const [narrow, setNarrow] = useState(false);
+	const [isDrawer, setIsDrawer] = useState(false);
 	const [mounted, setMounted] = useState(false);
 
 	useEffect(() => {
@@ -148,41 +164,73 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		void window.lh?.getZoom?.().then(setZoomVar);
 
 		const stored = localStorage.getItem(STORAGE_KEY);
-		// Default: open (first run introduces the sidebar).
-		setOpen(stored === null ? true : stored === "1");
+		// Default: open on desktop/landscape; overlay drawer on narrow/tablet starts closed.
+		setDesktopOpen(stored === null ? true : stored === "1");
+		if (IS_ELECTRON && typeof window.lh?.expandWindow === "function") {
+			setNarrow(window.innerWidth < SIDEBAR_AUTOCLOSE);
+			setIsDrawer(false);
+		} else {
+			const drawer = window.innerWidth < DRAWER_BREAKPOINT;
+			setIsDrawer(drawer);
+			if (drawer) setDrawerOpen(false);
+		}
 		setMounted(true);
 		return () => off?.();
 	}, []);
 
-	// Narrow-window auto-close/auto-restore (see SIDEBAR_AUTOCLOSE note):
-	// fires only on actual resizes — a boolean compare, no layout work.
-	// Both this and the mount effect land before the first paint, so a
-	// narrow window never flashes the open sidebar on load.
+	// Responsive viewport tracking: Electron uses SIDEBAR_AUTOCLOSE + expandWindow,
+	// whereas browser / iPadOS Safari / remote tablet viewports below DRAWER_BREAKPOINT
+	// switch to a true overlay drawer that defaults closed and never squeezes <main>.
 	useEffect(() => {
-		if (!IS_ELECTRON) return; // plain-browser tabs open freely
-		const onResize = () => setNarrow(window.innerWidth < SIDEBAR_AUTOCLOSE);
+		const onResize = () => {
+			if (IS_ELECTRON && typeof window.lh?.expandWindow === "function") {
+				setNarrow(window.innerWidth < SIDEBAR_AUTOCLOSE);
+				return;
+			}
+			const nextDrawer = window.innerWidth < DRAWER_BREAKPOINT;
+			setIsDrawer((prev) => {
+				if (nextDrawer && !prev) setDrawerOpen(false);
+				return nextDrawer;
+			});
+		};
 		onResize();
 		window.addEventListener("resize", onResize);
 		return () => window.removeEventListener("resize", onResize);
 	}, []);
 
+	const effectiveOpen = IS_ELECTRON && typeof window !== "undefined" && typeof window.lh?.expandWindow === "function"
+		? desktopOpen && !narrow
+		: isDrawer
+			? drawerOpen
+			: desktopOpen;
+
+	const closeDrawer = useCallback(() => {
+		setDrawerOpen(false);
+	}, []);
+
 	const toggle = useCallback(() => {
-		// Opening while narrow (auto-closed, or the user's own closed-at-
-		// narrow): ask the shell to widen to the threshold — the resize
-		// listener flips `narrow` and the sidebar appears. The preference
-		// persists like any other open, so a restart at a narrow width
-		// still auto-restores when widened.
-		if (narrow && !open) {
-			localStorage.setItem(STORAGE_KEY, "0");
-			setOpen(true);
-			window.lh?.expandWindow();
+		if (IS_ELECTRON && typeof window.lh?.expandWindow === "function") {
+			if (narrow && !desktopOpen) {
+				localStorage.setItem(STORAGE_KEY, "0");
+				setDesktopOpen(true);
+				window.lh.expandWindow();
+				return;
+			}
+			setDesktopOpen((v) => {
+				localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
+				return !v;
+			});
 			return;
 		}
-		setOpen((v) => {
+		if (isDrawer) {
+			setDrawerOpen((v) => !v);
+			return;
+		}
+		setDesktopOpen((v) => {
 			localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
 			return !v;
 		});
-	}, [narrow, open]);
+	}, [narrow, desktopOpen, isDrawer]);
 
 	// ⌘B: the global shortcut dispatches kbdEventForAction("toggle-sidebar")
 	// and the context answers on exactly that name — the shared spelling
@@ -198,9 +246,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
+		<SidebarContext.Provider value={{ open: effectiveOpen, isDrawer, toggle, closeDrawer }}>
 			{/* transitions gated on mount: no slide-in flash on page load */}
-			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
+			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity,transform]")}>{children}</div>
 		</SidebarContext.Provider>
 	);
 }
@@ -222,8 +270,8 @@ export function SidebarToggle() {
 	return (
 		<span
 			className={cn(
-				"sidebar-motion lh-no-drag relative flex h-9 shrink-0 overflow-hidden duration-200",
-				open ? "w-0 -mr-3" : "w-9 mr-0 lh-closed-toggle",
+				"sidebar-motion lh-no-drag relative flex h-11 shrink-0 items-center justify-center overflow-hidden duration-200",
+				open ? "w-0 -mr-3" : "w-11 mr-0 lh-closed-toggle",
 			)}
 		>
 			<Hint label="Open sidebar" action="toggle-sidebar">
@@ -234,7 +282,7 @@ export function SidebarToggle() {
 				aria-hidden={open}
 				tabIndex={open ? -1 : 0}
 				onClick={toggle}
-				className={cn("sidebar-motion duration-200", open ? "pointer-events-none opacity-0" : "opacity-100")}
+				className={cn("sidebar-motion size-11 duration-200", open ? "pointer-events-none opacity-0" : "opacity-100")}
 			>
 				{/* Owner, round 6: size-4, SAME as the close glyph — the toggle
 				    must not grow when the sidebar is closed (it did: size-5 here).
@@ -310,6 +358,7 @@ export function SessionRow({
 	onOpen,
 	kbdSelected = false,
 	onContextMenu,
+	onOpenMenu,
 }: {
 	chat: ChatListItem;
 	active: boolean;
@@ -319,19 +368,11 @@ export function SessionRow({
 	kbdSelected?: boolean;
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+	/** Touch-accessible 1-tap menu trigger (opens the same MenuShell as right-click). */
+	onOpenMenu?: (anchor: HTMLElement) => void;
 }) {
-	return (
-		<button
-			type="button"
-			onClick={onOpen}
-			onContextMenu={onContextMenu}
-			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
-			className={cn(
-				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
-				active && "bg-accent",
-				kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
-			)}
-		>
+	const inner = (
+		<>
 			<SessionStatus busy={chat.busy || chat.compacting} />
 			<span className="min-w-0 flex-1">
 				{/* Titles are the learner's/teacher's WORDS — Source Sans 3, the
@@ -348,7 +389,56 @@ export function SessionRow({
 			{(chat.kind ?? "teach") === "practice" && (
 				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
 			)}
-		</button>
+		</>
+	);
+	if (!onOpenMenu) {
+		return (
+			<button
+				type="button"
+				onClick={onOpen}
+				onContextMenu={onContextMenu}
+				data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
+				className={cn(
+					"relative mb-0.5 flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
+					active && "bg-accent",
+					kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
+				)}
+			>
+				{inner}
+			</button>
+		);
+	}
+	return (
+		<div
+			className={cn(
+				"group/row relative mb-0.5 flex w-full items-center rounded-lg transition-colors hover:bg-accent",
+				active && "bg-accent",
+				kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
+			)}
+		>
+			<button
+				type="button"
+				onClick={onOpen}
+				onContextMenu={onContextMenu}
+				data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
+				className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg py-2 pl-3 pr-1 text-left"
+			>
+				{inner}
+			</button>
+			<button
+				type="button"
+				aria-label={`More actions for ${chat.title}`}
+				title="Session options"
+				data-testid="session-row-more"
+				onClick={(e) => {
+					e.stopPropagation();
+					onOpenMenu(e.currentTarget);
+				}}
+				className="mr-1 flex size-11 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-100 transition-opacity hover:bg-background/60 hover:text-foreground lg:opacity-0 lg:focus-visible:opacity-100 lg:group-hover/row:opacity-100 [@media(hover:none),(pointer:coarse)]:opacity-100"
+			>
+				<EllipsisIcon className="size-4" aria-hidden="true" />
+			</button>
+		</div>
 	);
 }
 
@@ -413,17 +503,17 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
 	const interactions = useInteractionLayers();
-	const { open, toggle } = useSidebar();
+	const { open, isDrawer, toggle, closeDrawer } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
 	useEffect(() => {
-		const stored = window.localStorage.getItem(KIND_FILTER_KEY);
+		const stored = window.localStorage?.getItem(KIND_FILTER_KEY);
 		if (stored === "teach" || stored === "all" || stored === "practice") setKindFilter(stored);
 	}, []);
 	const setFilter = useCallback((f: SessionKindFilter) => {
 		setKindFilter(f);
-		window.localStorage.setItem(KIND_FILTER_KEY, f);
+		window.localStorage?.setItem(KIND_FILTER_KEY, f);
 	}, []);
 	const pathname = usePathname();
 	const router = useRouter();
@@ -434,8 +524,9 @@ function SessionsSidebar() {
 	   message is sent (and that message becomes its title). Search: a
 	   client-side filter over the poll snapshot — no server round trip. */
 	const newSession = useCallback(() => {
+		closeDrawer();
 		router.push("/chat/new");
-	}, [router]);
+	}, [router, closeDrawer]);
 
 	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
 	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
@@ -560,6 +651,7 @@ function SessionsSidebar() {
 	const [kbdIndex, setKbdIndex] = useState<number | null>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<HTMLDivElement>(null);
+	const closeBtnRef = useRef<HTMLButtonElement>(null);
 
 	/* ── Wave 6 chunk A: context menu + inline rename + deletion ──
 	   Right-click a session row → MenuShell: the two management actions
@@ -578,6 +670,11 @@ function SessionsSidebar() {
 		e.preventDefault(); // suppress the native menu
 		ctxAnchorRef.current = e.currentTarget;
 		setCtxChatId(chat.id);
+	};
+
+	const openRowMenu = (anchor: HTMLElement, chat: ChatListItem) => {
+		ctxAnchorRef.current = anchor;
+		setCtxChatId((prev) => (prev === chat.id ? null : chat.id));
 	};
 
 	// The menu contract (agent-section's): any pointerdown outside the menu
@@ -646,12 +743,32 @@ function SessionsSidebar() {
 		return () => window.removeEventListener("lh:kbd-sessions-search", onFocusSearch);
 	}, [open, toggle, interactions]);
 
-	// Keep the kbd-selected row in view (the rows are the container's only
-	// buttons, so the index matches).
+	// Keep the kbd-selected row in view.
 	useEffect(() => {
 		if (kbdIndex === null) return;
-		listRef.current?.querySelectorAll("button")[kbdIndex]?.scrollIntoView({ block: "nearest" });
+		listRef.current?.querySelectorAll<HTMLElement>('[data-testid^="session-row"]')[kbdIndex]?.scrollIntoView({ block: "nearest" });
 	}, [kbdIndex]);
+
+	// Overlay drawer accessibility & scroll lock: lock background scroll,
+	// focus the close button without scrolling, and allow Escape to dismiss.
+	useEffect(() => {
+		if (!isDrawer || !open) return;
+		const prevOverflow = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		closeBtnRef.current?.focus({ preventScroll: true });
+		const onKeyDown = (e: KeyboardEvent) => {
+			if (e.key !== "Escape" || e.defaultPrevented) return;
+			if (interactions.getActiveModal() || interactions.getTopLayer()) return;
+			if (renamingId !== null || ctxChatId !== null) return;
+			e.preventDefault();
+			closeDrawer();
+		};
+		window.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.body.style.overflow = prevOverflow;
+			window.removeEventListener("keydown", onKeyDown);
+		};
+	}, [isDrawer, open, interactions, renamingId, ctxChatId, closeDrawer]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -661,22 +778,35 @@ function SessionsSidebar() {
 	}, [open, pathname, refresh]);
 
 	return (
+		<>
 		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+			data-drawer={isDrawer ? "true" : undefined}
+			role={isDrawer && open ? "dialog" : undefined}
+			aria-label={isDrawer && open ? "Sessions navigation" : undefined}
+			aria-modal={isDrawer && open ? true : undefined}
+			className={cn(
+				"sidebar-motion duration-200",
+				isDrawer
+					? cn(
+							"fixed inset-y-0 left-0 z-50 w-[min(18rem,calc(100vw-3rem))] max-w-full overflow-hidden shadow-2xl",
+							open ? "visible translate-x-0 opacity-100" : "pointer-events-none invisible -translate-x-full opacity-0",
+						)
+					: cn("shrink-0 overflow-hidden", open ? "w-72" : "w-0"),
+			)}
 			aria-hidden={!open}
 		>
-			<div className="flex h-full w-72 flex-col border-r bg-background">
+			<div className={cn("flex h-full flex-col border-r bg-background pt-[var(--lh-safe-top)] pb-[var(--lh-safe-bottom)] pl-[var(--lh-safe-left)]", isDrawer ? "w-full" : "w-72")}>
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
 				    window's drag surface and starts after the traffic lights
 				    (.lh-lights-gutter); in the browser those classes are inert. */}
-				<div className="lh-drag lh-lights-gutter flex items-center justify-between px-4 py-3">
+				<div className="lh-drag lh-lights-gutter flex items-center justify-between px-3 py-2">
 					{/* The owner's mark (2026-09-17) replaces the "LH" text — still the
 					    home link, still vertically centered by the band's items-center.
 					    The 92px .lh-lights-gutter keeps it clear of the traffic lights
 					    with the lights' own edge-inset as the gap. */}
 					{/* Hover mirrors the ghost toggle buttons (owner ask, 2026-09-17):
-					    same size-9 chip geometry, same hover:bg-accent treatment. */}
+					    same chip geometry, same hover:bg-accent treatment. */}
 					<Hint
 						// Kept (owner, subtlety round 2026-09-25) but to the RIGHT
 						// of the logo, carrying its real shortcut: ⌘G jumps to
@@ -689,18 +819,20 @@ function SessionsSidebar() {
 						<Link
 							href="/"
 							aria-label="Home"
-							className="lh-no-drag flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
+							onClick={() => closeDrawer()}
+							className="lh-no-drag flex size-11 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
 						>
 							<LhMark className="size-6" />
 						</Link>
 					</Hint>
 					<Hint label="Close sidebar" action="toggle-sidebar">
 						<Button
+							ref={closeBtnRef}
 							variant="ghost"
 							size="icon"
 							aria-label="Close sidebar"
 							onClick={toggle}
-							className="lh-no-drag"
+							className="lh-no-drag size-11 min-h-11 min-w-11"
 						>
 							<PanelLeftCloseIcon className="size-4" />
 						</Button>
@@ -714,7 +846,7 @@ function SessionsSidebar() {
 						data-testid="new-session"
 						title="Teaching"
 						onClick={() => void newSession()}
-						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						className="flex min-h-11 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<PlusIcon className="size-3 shrink-0" />
 						<span className="min-w-0 truncate">Teaching</span>
@@ -724,8 +856,11 @@ function SessionsSidebar() {
 						type="button"
 						data-testid="new-session-practice"
 						title="Practice"
-						onClick={() => router.push("/chat/new?mode=practice")}
-						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						onClick={() => {
+							closeDrawer();
+							router.push("/chat/new?mode=practice");
+						}}
+						className="flex min-h-11 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<DumbbellIcon className="size-3 shrink-0" />
 						<span className="min-w-0 truncate">Practice</span>
@@ -782,6 +917,7 @@ function SessionsSidebar() {
 									const target = shown![kbdIndex !== null && kbdIndex < n ? kbdIndex : 0];
 									if (!target) return;
 									e.preventDefault();
+									closeDrawer();
 									router.push(`/chat/${target.id}`);
 									setKbdIndex(null);
 									e.currentTarget.blur();
@@ -789,7 +925,7 @@ function SessionsSidebar() {
 							}}
 							placeholder="Search…"
 							aria-label="Search sessions"
-							className="h-6 rounded-sm border-border bg-background pl-6 text-xs placeholder:text-muted-foreground/60"
+							className="h-6 max-lg:h-10 [@media(pointer:coarse)]:h-10 rounded-sm border-border bg-background pl-6 text-xs max-lg:text-[16px] placeholder:text-muted-foreground/60"
 						/>
 						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
 					</span>
@@ -811,7 +947,7 @@ function SessionsSidebar() {
 							data-testid={`kind-filter-${f}`}
 							onClick={() => setFilter(f)}
 							className={cn(
-								"flex-1 rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
+								"flex-1 min-h-10 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
 								kindFilter === f
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:text-foreground",
@@ -846,9 +982,11 @@ function SessionsSidebar() {
 									kbdSelected={i === kbdIndex}
 									onOpen={() => {
 										setKbdIndex(null);
+										closeDrawer();
 										router.push(`/chat/${c.id}`);
 									}}
 									onContextMenu={(e) => openContext(e, c)}
+									onOpenMenu={(anchor) => openRowMenu(anchor, c)}
 								/>
 							),
 						)
@@ -869,9 +1007,12 @@ function SessionsSidebar() {
 						<Hint label="Settings" action="open-settings" side="right">
 							<button
 								type="button"
-								onClick={() => openSettings()}
+								onClick={() => {
+									closeDrawer();
+									openSettings();
+								}}
 								data-testid="settings-entry"
-								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+								className="flex min-h-11 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
 								<SettingsIcon className="size-3" />
 								Settings
@@ -889,7 +1030,7 @@ function SessionsSidebar() {
 						anchorRef={ctxAnchorRef}
 						testid="session-context-menu"
 						preferredSide="down"
-						menuClass="flex w-52 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
+						menuClass="flex w-[min(14rem,calc(100vw-1rem))] flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
 					>
 						{/* The two management actions first, then the extraction block
 						    (owner refinement round, 2026-09-24): Rename/Delete stay at the
@@ -904,7 +1045,7 @@ function SessionsSidebar() {
 								setRenamingId(ctxChatId);
 								setCtxChatId(null);
 							}}
-							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+							className="flex min-h-11 items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
 							Rename
 						</button>
@@ -926,7 +1067,7 @@ function SessionsSidebar() {
 								a.click();
 								a.remove();
 							}}
-							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+							className="flex min-h-11 items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
 							Export as Markdown…
 						</button>
@@ -938,7 +1079,7 @@ function SessionsSidebar() {
 								if (target) setDeleting(target);
 								setCtxChatId(null);
 							}}
-							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
+							className="flex min-h-11 items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
 						>
 							Delete…
 						</button>
@@ -955,6 +1096,15 @@ function SessionsSidebar() {
 					onDeleted={onDeleted}
 				/>
 			</aside>
+			{isDrawer && open && (
+				<div
+					data-testid="sidebar-backdrop"
+					aria-hidden="true"
+					onClick={closeDrawer}
+					className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[1px]"
+				/>
+			)}
+		</>
 	);
 }
 
@@ -967,7 +1117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 		<HostContentRootContext.Provider value={contentRoot}>
 			<InteractionLayersProvider><SettingsDialogProvider>
 				<SessionsSidebar />
-				<FilePathDropZone className="relative isolate min-w-0 flex-1" onContentRoot={setContentRoot}>{children}</FilePathDropZone>
+				<FilePathDropZone className="relative isolate min-w-0 flex-1 overflow-x-clip" onContentRoot={setContentRoot}>{children}</FilePathDropZone>
 				{/* The single document-level keydown listener (keyboard wave A) —
 				    after the content in the tree, but it's window-level so order only
 				    matters for the events it dispatches, never for DOM priority. */}

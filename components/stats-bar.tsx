@@ -103,7 +103,7 @@ export function StatsBar({
 			// (so its transparent gradient area never blocks scrolling) — this row
 			// must re-enable events or every control on it is dead (the model-
 			// control wave caught this live: buttons rendered, clicks never landed).
-			className="pointer-events-auto relative flex items-center justify-between gap-3 px-3 pt-2 text-xs text-muted-foreground"
+			className="pointer-events-auto relative flex flex-wrap sm:flex-nowrap items-center justify-between gap-x-2 gap-y-1.5 sm:gap-3 px-1 sm:px-3 pt-2 text-xs text-muted-foreground"
 		>
 			{/* The summary button + its popover: the popover anchors to this
 			    wrapper, CENTERED over the button itself (owner, stats round 2)
@@ -117,7 +117,7 @@ export function StatsBar({
 			{/* The left side: the session-data summary — only once a session
 			    exists (turns). Pre-chat renders nothing (see the header). */}
 			{(chatId || turns.length > 0) && (
-			<div ref={barRef} className="relative">
+			<div ref={barRef} className="relative min-w-0">
 				{/* No tooltip — the numbers describe themselves and the popover
 			    speaks on click (owner, subtlety round 2026-09-25). */}
 			<button
@@ -125,7 +125,7 @@ export function StatsBar({
 				onClick={() => setOpen((o) => !o)}
 				aria-expanded={open}
 				data-testid="stats-summary"
-				className="flex items-center gap-1.5 tabular-nums transition-colors hover:text-foreground"
+				className="flex min-h-11 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 items-center gap-1.5 tabular-nums transition-colors hover:text-foreground"
 			>
 				<span data-testid="stats-context">
 					{contextLabel}
@@ -138,7 +138,7 @@ export function StatsBar({
 						ref={panelRef}
 						data-testid="stats-detail"
 						style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
-						className="absolute bottom-full left-1/2 mb-1.5 w-72 -translate-x-1/2 rounded-xl border bg-card p-3 text-xs shadow-xl"
+						className="absolute bottom-full left-0 sm:left-1/2 mb-1.5 w-[min(18rem,calc(100vw-2rem))] sm:-translate-x-1/2 rounded-xl border bg-card p-3 text-xs shadow-xl"
 					>
 						<div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 							Session stats

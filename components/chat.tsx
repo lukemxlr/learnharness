@@ -41,6 +41,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
+import { subscribeVisualViewport, useVisualViewport } from "@/components/visual-viewport";
 import { createDockMorph } from "@/components/dock-morph";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
@@ -1177,9 +1178,9 @@ export function Chat({
 			<Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
 				data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
 				title={hasHistory ? "Open side conversation" : "Ask a side question"}
-				className={hasHistory ? "border border-border/60 text-muted-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}
+				className={cn("size-11 min-h-11 min-w-11", hasHistory ? "border border-border/60 text-muted-foreground" : "text-muted-foreground/60 hover:text-muted-foreground")}
 				onClick={(event) => openSideThread({ sourceMessageId, anchor: { kind: "element", element: event.currentTarget } })}>
-				<MessageCircleQuestionIcon aria-hidden className="size-3.5" fill="currentColor" fillOpacity={hasHistory ? 0.12 : 0} />
+				<MessageCircleQuestionIcon aria-hidden className="size-4" fill="currentColor" fillOpacity={hasHistory ? 0.12 : 0} />
 			</Button>
 		</div>;
 	};
@@ -1928,12 +1929,12 @@ export function Chat({
 								data-plugin-chrome-title
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight max-sm:text-xl caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
 							    mousedown handler. */}
-							<div className="min-w-4 flex-1" aria-hidden="true" />
+							<div className="min-w-4 max-sm:min-w-1 flex-1" aria-hidden="true" />
 						</>
 					) : (
 					<>
@@ -1950,14 +1951,14 @@ export function Chat({
 								setRenaming(true);
 							}}
 							data-plugin-chrome-title
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-no-drag -mx-1.5 flex min-h-11 min-w-4 shrink cursor-text items-center truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight max-sm:text-xl transition-colors hover:bg-accent"
 						>
-							{titleText}
+							<span className="truncate">{titleText}</span>
 							</button>
 						</Hint>
 							{/* flex-1 spacer: keeps the chips at the right edge AND stays a
 							    drag surface (no carve-out) — the freed bar is grippable. */}
-							<div className="min-w-4 flex-1" aria-hidden="true" />
+							<div className="min-w-4 max-sm:min-w-1 flex-1" aria-hidden="true" />
 					</>
 					)}
 					{/* The plan chip (owner, plan-placement round): session-level
@@ -1972,10 +1973,10 @@ export function Chat({
 								blurAfterPointerClick(e);
 								setPlanOpen(true);
 							}}
-							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+							className="lh-no-drag flex min-h-11 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2.5 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
 						>
 							<WaypointsIcon className="size-3.5 text-primary" aria-hidden />
-							Plan
+							<span className="max-[400px]:sr-only">Plan</span>
 						</button>
 </Hint>
 					)}
@@ -1994,7 +1995,7 @@ export function Chat({
 							data-testid="phase-chip"
 							data-phase="practice"
 							aria-hidden="true"
-							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+							className="pointer-events-none flex max-[420px]:hidden shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
 						>
 							<DumbbellIcon className="size-3" />
 							Practice
@@ -2285,7 +2286,7 @@ export function Chat({
 								<div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
 									<span>Something went wrong: {error.message}</span>
 									{retryable && (
-										<Button variant="outline" size="xs" data-testid="retry-failed-turn" onClick={retryFailedTurn}>
+										<Button variant="outline" size="xs" data-testid="retry-failed-turn" className="min-h-11 px-3" onClick={retryFailedTurn}>
 											Retry
 										</Button>
 									)}
@@ -2381,7 +2382,7 @@ export function Chat({
 										type="button"
 										data-testid="setup-cta"
 										onClick={() => setSetupOpen(true)}
-										className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
+										className="min-h-11 rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 									>
 										Set up your models
 									</button>
@@ -2934,6 +2935,11 @@ export function DockOverlay({
 	// fold's own morph shrinks the block and gives back the reserve, and
 	// stamping that self-mutes the at-bottom re-expand — the box got stuck
 	// collapsed (resize round).
+	const vv = useVisualViewport();
+	const keyboardInset = vv.bottomInset;
+	const keyboardOpenRef = useRef(false);
+	keyboardOpenRef.current = keyboardInset > 40;
+
 	const geometryAtRef = useRef(0);
 	useIsoLayoutEffect(() => {
 		const block = blockRef.current;
@@ -2952,12 +2958,46 @@ export function DockOverlay({
 		return () => ro.disconnect();
 	}, []);
 
+	// Stamp geometry mute on scroll-column height/width shifts (orientation
+	// changes, Split-View resizes, and iPadOS virtual keyboard open/close) so
+	// transient scrollTop clamping never falsely auto-collapses an active dock.
+	useIsoLayoutEffect(() => {
+		const el = scrollRef.current;
+		let prevW = el?.clientWidth ?? 0;
+		let prevH = el?.clientHeight ?? 0;
+		const onColumnResize = () => {
+			if (!el) return;
+			const w = el.clientWidth;
+			const h = el.clientHeight;
+			if (Math.abs(w - prevW) > 1 || Math.abs(h - prevH) > 1) {
+				prevW = w;
+				prevH = h;
+				geometryAtRef.current = Date.now();
+			}
+		};
+		const ro = el ? new ResizeObserver(onColumnResize) : null;
+		if (el && ro) ro.observe(el);
+		const offVv = typeof window !== "undefined"
+			? subscribeVisualViewport(window, () => {
+					geometryAtRef.current = Date.now();
+				})
+			: undefined;
+		return () => {
+			ro?.disconnect();
+			offVv?.();
+		};
+	}, [scrollRef]);
+
 	// The reserve grows immediately, but never shrinks while a question or
 	// practice problem owns the dock: shrinking flow space could pin a nearby
 	// learner back to the bottom. Composer mode may give space back.
 	const reserveRef = useRef(0);
+	const keyboardInsetRef = useRef(keyboardInset);
+	keyboardInsetRef.current = keyboardInset;
 	const offer = useCallback((blockH: number) => {
-		const next = blockH + GRADIENT_H;
+		const kb = keyboardInsetRef.current;
+		const gradH = kb > 40 ? 32 : GRADIENT_H;
+		const next = blockH + gradH + kb;
 		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
 		// Stamp growth at the source, including child-only field resizes, so
 		// stick-to-bottom's catch-up is not mistaken for the learner leaving.
@@ -3104,8 +3144,8 @@ export function DockOverlay({
 				// INTENT-GATED FOLD (owner ruling, 2026-10-05): distance alone
 				// folded on stick-to-bottom's catch-up transients; a real fold
 				// needs the distance AND stick-to-bottom agreeing the learner
-				// left the bottom.
-				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current) setExpanded(false);
+				// left the bottom. Never auto-fold while the onscreen keyboard is open.
+				if (d > COLLAPSE_DIST && !expandIntentRef.current && !atBottomRef.current && !keyboardOpenRef.current) setExpanded(false);
 			} else if (d < EXPAND_DIST) {
 				// Teach checks stay collapsed until the learner opens them (W5): the
 				// at-bottom auto-expand would pop the form over the teaching.
@@ -3159,9 +3199,9 @@ export function DockOverlay({
 	});
 
 	return (
-		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
-			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-			<div ref={blockRef} className="relative bg-background pb-5">
+		<div className="pointer-events-none absolute inset-x-0" style={{ right: sbInset, bottom: keyboardInset }}>
+			<div className={cn("bg-gradient-to-t from-background via-background/85 to-transparent", keyboardInset > 40 ? "h-8" : "h-24")} />
+			<div ref={blockRef} className={cn("relative bg-background pl-[var(--lh-safe-left)] pr-[var(--lh-safe-right)]", keyboardInset > 40 ? "pb-2" : "pb-[max(1.25rem,var(--lh-safe-bottom))]")}>
 				<div className={DOCK}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>

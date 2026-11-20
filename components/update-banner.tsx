@@ -22,16 +22,16 @@ export default function UpdateBanner() {
 	return (
 		<div
 			data-testid="update-banner"
-			className="fixed right-4 bottom-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
+			className="fixed right-[max(1rem,var(--lh-safe-right))] bottom-[max(1rem,var(--lh-safe-bottom))] z-50 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
 		>
-			<div className="text-sm">
+			<div className="min-w-0 text-sm">
 				<span className="font-medium">LearnHarness {ready.version ?? "update"} is ready</span>
 				<span className="text-muted-foreground"> — restart to finish installing.</span>
 			</div>
 			<button
 				type="button"
 				onClick={() => window.lh?.installUpdate?.()}
-				className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent/80"
+				className="min-h-11 shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium transition-colors hover:bg-accent/80"
 			>
 				Restart
 			</button>
@@ -39,7 +39,7 @@ export default function UpdateBanner() {
 				type="button"
 				aria-label="Dismiss update notification"
 				onClick={() => setDismissedVersion(ready.version)}
-				className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				className="flex size-11 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			>
 				<XIcon className="size-4" aria-hidden="true" />
 			</button>

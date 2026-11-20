@@ -188,7 +188,7 @@ export function DraftShell({
 							</ConversationContent>
 						</Conversation>
 						<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-						<div className="bg-background pb-4">
+						<div className="bg-background pb-[max(1rem,var(--lh-safe-bottom))] pl-[var(--lh-safe-left)] pr-[var(--lh-safe-right)]">
 							<div className={DOCK}>
 								<ComposerActions
 									picker={(picks.length > 0 || mode === "practice") && (
@@ -230,7 +230,7 @@ export function DraftShell({
 			{/* The floating reopen toggle — pointer-events-none except the
 			    toggle itself (home's pattern), painted AFTER the overlay's
 			    column so nothing of it blocks the canvas area. */}
-			<header style={chromeStyle} className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
+			<header style={chromeStyle} className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 pl-[max(0.75rem,var(--lh-safe-left))] pr-[max(0.75rem,var(--lh-safe-right))] pt-[max(0.5rem,var(--lh-safe-top))] pb-2">
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
@@ -374,7 +374,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 								type="button"
 								data-testid="setup-cta"
 								onClick={() => setSetupOpen(true)}
-								className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
+								className="min-h-11 rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 							>
 								Set up your models
 							</button>

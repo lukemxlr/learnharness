@@ -10,6 +10,7 @@ import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
 import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers } from "./interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { readVisualViewport, subscribeVisualViewport } from "./visual-viewport";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
@@ -29,16 +30,20 @@ export function pathsForFiles(files: Iterable<File>, resolve: (file: File) => st
 
 /** Center over the paperclip, but clear the whole visible composer, not just
  * its bottom-aligned button. Clamp horizontally and scroll above the dock. */
-export function attachmentPopupPlacement(button: { left: number; right: number }, composer: { top: number }, popupWidth: number, viewport: { width: number; height: number }) {
+export function attachmentPopupPlacement(button: { left: number; right: number }, composer: { top: number }, popupWidth: number, viewport: { width: number; height: number; offsetTop?: number; offsetLeft?: number; layoutHeight?: number }) {
 	const edge = 8;
 	const gap = 4;
+	const offsetTop = viewport.offsetTop ?? 0;
+	const offsetLeft = viewport.offsetLeft ?? 0;
+	const vpBottom = offsetTop + viewport.height;
+	const layoutHeight = viewport.layoutHeight ?? vpBottom;
 	const maxWidth = Math.max(0, viewport.width - edge * 2);
 	const width = Math.min(popupWidth, maxWidth);
 	return {
-		left: Math.max(edge, Math.min((button.left + button.right - width) / 2, viewport.width - edge - width)),
-		bottom: viewport.height - composer.top + gap,
+		left: Math.max(offsetLeft + edge, Math.min((button.left + button.right - width) / 2, offsetLeft + viewport.width - edge - width)),
+		bottom: Math.max(Math.max(0, layoutHeight - vpBottom) + edge, layoutHeight - composer.top + gap),
 		maxWidth,
-		maxHeight: Math.max(0, Math.min(viewport.height * 0.6, composer.top - gap - edge)),
+		maxHeight: Math.max(0, Math.min(viewport.height * 0.6, composer.top - offsetTop - gap - edge)),
 	};
 }
 
@@ -115,15 +120,15 @@ export function AttachFilesButton({
 		const composer = button.closest<HTMLElement>("[data-attachment-composer]") ?? button;
 		const place = () => {
 			setPlacement(attachmentPopupPlacement(button.getBoundingClientRect(), composer.getBoundingClientRect(),
-				popup.getBoundingClientRect().width, { width: window.innerWidth, height: window.innerHeight }));
+				popup.getBoundingClientRect().width, readVisualViewport(window)));
 		};
 		place();
 		const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(place);
 		observer?.observe(composer);
 		observer?.observe(popup);
 		window.addEventListener("scroll", place, true);
-		window.addEventListener("resize", place);
-		return () => { observer?.disconnect(); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+		const offVv = subscribeVisualViewport(window, place);
+		return () => { observer?.disconnect(); window.removeEventListener("scroll", place, true); offVv(); };
 	}, [open, notice]);
 	useEffect(() => { if (open && positioned && isInteractionScopeEligible(popupRef.current, controller)) popupRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open, positioned, controller]);
 	useEffect(() => {
@@ -210,7 +215,7 @@ export function AttachFilesButton({
 				aria-label={open ? "Attach files or a folder" : undefined}
 				data-testid="attachment-popup"
 				style={{ position: "fixed", zIndex: 60, ...(placement ?? { left: 0, top: 0, visibility: "hidden" }), overflowY: "auto" }}
-				className={open ? "w-max rounded-lg border bg-card p-1 shadow-lg" : "w-64 rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg"}
+				className={open ? "w-max max-w-[calc(100vw-1rem)] rounded-lg border bg-card p-1 shadow-lg" : "w-[min(16rem,calc(100vw-1rem))] rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg"}
 				onKeyDown={(event) => {
 					const buttons = Array.from(popupRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
 					const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -218,16 +223,16 @@ export function AttachFilesButton({
 					if (next >= 0) { event.preventDefault(); buttons[next]?.focus(); }
 				}}>
 				{open ? <>
-					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+					<button type="button" role="menuitem" className="flex min-h-11 w-full items-center rounded px-3 py-2 text-left text-xs hover:bg-accent"
 						onClick={() => {
 							pendingDesktopActionRef.current = "path";
 							if (pickerRef.current) pickerRef.current.removeAttribute("accept");
 							setOpen(false);
 							pickerRef.current?.click();
 						}}>Files</button>
-					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+					<button type="button" role="menuitem" className="flex min-h-11 w-full items-center rounded px-3 py-2 text-left text-xs hover:bg-accent"
 						onClick={() => { void chooseFolder(); }}>Folder</button>
-					{onUploadFiles && <button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+					{onUploadFiles && <button type="button" role="menuitem" className="flex min-h-11 w-full items-center rounded px-3 py-2 text-left text-xs hover:bg-accent"
 						onClick={() => {
 							pendingDesktopActionRef.current = "upload";
 							if (pickerRef.current) pickerRef.current.accept = accept;

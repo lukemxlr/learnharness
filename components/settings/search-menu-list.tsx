@@ -80,11 +80,11 @@ export function SearchMenuList<T>({
 				}
 			}}
 			placeholder={placeholder}
-			className="lh-input mb-1.5 w-full rounded-lg border bg-background px-2 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-ring"
+			className="lh-input mb-1.5 w-full shrink-0 rounded-lg border bg-background px-2.5 py-2 text-foreground outline-none focus:ring-1 focus:ring-ring"
 		/>
-		{!items && loading && <div className="px-2 py-3 text-center text-muted-foreground">{loading}</div>}
-		{items && results.length === 0 && <div className="px-2 py-3 text-center text-muted-foreground">{empty}</div>}
-		<ul ref={listRef} data-testid={listTestid} className="flex max-h-72 flex-col overflow-y-auto px-1">
+		{!items && loading && <div className="shrink-0 px-2 py-3 text-center text-muted-foreground">{loading}</div>}
+		{items && results.length === 0 && <div className="shrink-0 px-2 py-3 text-center text-muted-foreground">{empty}</div>}
+		<ul ref={listRef} data-testid={listTestid} className="flex min-h-0 max-h-72 shrink flex-col overflow-y-auto px-1">
 			{results.map((item, i) => <li key={itemKey(item)}>
 				<button
 					type="button"
@@ -92,7 +92,7 @@ export function SearchMenuList<T>({
 					data-idx={i}
 					disabled={disabled}
 					onClick={() => onPick(item)}
-					className={`flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted ${
+					className={`flex min-h-11 w-full flex-col justify-center gap-0.5 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-muted ${
 						i === menuIdx ? "bg-accent/40 ring-1 ring-inset ring-border" : ""
 					}${isSelected(item) && i !== menuIdx ? " bg-muted/60" : ""}`}
 				>{renderItem(item)}</button>

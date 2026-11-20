@@ -49,6 +49,7 @@ import { SettingsRow, SettingsSection } from "./controls.tsx";
 import { Button } from "@/components/ui/button";
 import type { SessionStatusResponse } from "@/src/core";
 import { UpdateSettings } from "./update-settings.tsx";
+import { useCanChangeServerUrl } from "@/components/remote-server";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -350,11 +351,11 @@ export function SettingsDialogBody({
 			aria-modal="true"
 			aria-label="Settings"
 			data-testid="settings-dialog"
-			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
+			className="settings-dialog-pop flex h-[620px] max-h-[calc(100dvh-1.5rem)] w-[920px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
-			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
+			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5 max-sm:px-3">
 				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
 				<Hint
 						// Esc closes through the shared interaction owner.
@@ -366,7 +367,7 @@ export function SettingsDialogBody({
 					type="button"
 					aria-label="Close settings"
 					data-testid="settings-close"
-					className="ml-auto size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					className="-mr-2 ml-auto flex size-11 min-h-11 min-w-11 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					onClick={onClose}
 				>
 					<svg
@@ -382,22 +383,23 @@ export function SettingsDialogBody({
 					</Hint>
 			</header>
 
-			<div className="flex min-h-0 flex-1">
+			<div className="flex min-h-0 flex-1 flex-col md:flex-row">
 				{/* Left nav — mono labels and theme-inherited decorative icons,
-					    active = bg-accent. */}
+					    active = bg-accent. Stacks horizontally on <md so Split-View
+					    viewports give full width to settings-content while retaining w-48. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
+					className="flex min-h-0 w-48 max-md:w-full shrink-0 flex-row md:flex-col gap-1 overflow-x-auto md:overflow-y-auto border-b md:border-b-0 md:border-r border-border p-2"
 				>
 					{navSections.map((s, index) => (
 						<div key={s.id} className="shrink-0">
-							{index === SECTIONS.length && <hr className="my-2 border-border" />}
+							{index === SECTIONS.length && <hr className="my-2 hidden md:block border-border" />}
 							<button
 								type="button"
 								data-testid={`settings-nav-${s.id}`}
 								aria-current={selected === s.id}
-								className={`flex w-full items-center gap-2 break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+								className={`flex min-h-11 md:min-h-0 [@media(pointer:coarse)]:min-h-11 w-full items-center gap-2 whitespace-nowrap md:whitespace-normal break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
 									selected === s.id
 										? "bg-accent text-foreground"
 										: "text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -407,7 +409,7 @@ export function SettingsDialogBody({
 								{s.icon && <s.icon aria-hidden="true" focusable="false" className="size-3.5 shrink-0" />}
 								<span className="min-w-0">{s.label}</span>
 							</button>
-							{s.id === "plugins" && <hr className="my-2 border-border" />}
+							{s.id === "plugins" && <hr className="my-2 hidden md:block border-border" />}
 						</div>
 					))}
 				</nav>
@@ -456,6 +458,7 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+									<RemoteServerConnectionRow />
 									<AccountSessionRow />
 								</SettingsSection>
 							)}
@@ -531,6 +534,31 @@ export function SettingsDialogBody({
 	return renderFrame ? renderFrame(frame) : frame;
 }
 
+function RemoteServerConnectionRow() {
+	const canChangeServerUrl = useCanChangeServerUrl();
+	if (!canChangeServerUrl) return null;
+	return (
+		<SettingsRow
+			label="Server connection"
+			hint="Connected to a remote LearnHarness server"
+			testid="row-remote-server"
+		>
+			<Button
+				type="button"
+				size="xs"
+				variant="outline"
+				data-testid="change-server-url"
+				className="min-h-11 px-3"
+				onClick={() => {
+					void window.lh?.changeServerUrl?.();
+				}}
+			>
+				Change Server URL
+			</Button>
+		</SettingsRow>
+	);
+}
+
 function AccountSessionRow() {
 	const [session, setSession] = useState<SessionStatusResponse | null>(null);
 	const [signingOut, setSigningOut] = useState(false);
@@ -560,6 +588,7 @@ function AccountSessionRow() {
 				variant="outline"
 				disabled={signingOut}
 				data-testid="settings-sign-out"
+				className="min-h-11 px-3"
 				onClick={async () => {
 					setSigningOut(true);
 					await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});

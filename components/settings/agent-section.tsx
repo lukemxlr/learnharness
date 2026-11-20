@@ -737,7 +737,7 @@ export function AgentSection({
 									anchorTestid={`slot-cache-${slot}`}
 									testid={`slot-cache-menu-${slot}`}
 									onClose={() => { setOpenMenu(null); return "closed"; }}
-									menuClass="flex w-80 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+									menuClass="flex w-[min(20rem,calc(100vw-1rem))] flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 								>
 									<CacheRetentionMenu value={override?.cacheRetention} onPick={(value) => {
 										onModelsChange(composeSlotCacheRetention(models, slot, value));
@@ -750,7 +750,7 @@ export function AgentSection({
 											anchorTestid={`slot-model-${slot}`}
 										testid={`slot-model-menu-${slot}`}
 										onClose={() => { setOpenMenu(null); return "closed"; }}
-										menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+										menuClass="flex w-[min(22rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										<ModelMenuList
 											models={catalog ?? undefined}
@@ -779,7 +779,7 @@ export function AgentSection({
 											anchorTestid={`slot-thinking-${slot}`}
 										testid={`slot-thinking-menu-${slot}`}
 										onClose={() => { setOpenMenu(null); return "closed"; }}
-										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+										menuClass="flex w-[min(11rem,calc(100vw-1rem))] flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										<ThinkingMenuList
 											levels={levels.map(String)}
@@ -982,7 +982,7 @@ export function AgentSection({
 											anchorTestid="search-engine-trigger"
 										testid="search-engine-menu"
 										onClose={() => { setOpenMenu(null); return "closed"; }}
-										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
+										menuClass="flex w-[min(11rem,calc(100vw-1rem))] flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										{engineOption("auto", "Automatic", engine === null, null, () => {
 											onSectionChange(composeSearchEngine(agent, null));

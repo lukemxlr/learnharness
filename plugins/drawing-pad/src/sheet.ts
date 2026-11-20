@@ -67,6 +67,8 @@ export function mountSheet(
   let inlineError: string | undefined;
   let active: Stroke | undefined;
   let activeDraftId: number | undefined;
+  let activePointerType: string | undefined;
+  let activeStartedAt = 0;
   let pointerId: number | undefined;
   let panDrag: { x: number; y: number; pan: Draft["pan"]; rightButton: boolean } | undefined;
 
@@ -75,6 +77,7 @@ export function mountSheet(
     const id = activeDraftId;
     active = undefined;
     activeDraftId = undefined;
+    activePointerType = undefined;
     panDrag = undefined;
     const draft = currentDraft();
     if (stroke && draft.id === id && stroke.points.length > 0) {
@@ -406,11 +409,35 @@ export function mountSheet(
 
   const down = (event: PointerEvent) => {
     const rightButton = event.pointerType === "mouse" && event.button === 2;
-    if (disposed || signal.aborted || staging || pointerId !== undefined || !event.isPrimary) return;
+    if (disposed || signal.aborted || staging || !event.isPrimary) return;
+    // Apple Pencil priority / palm rejection: if a fresh uncommitted touch contact
+    // just landed (<250ms, <=4 samples) and an active stylus ("pen") touches down,
+    // discard the accidental palm stroke without committing to undo history.
+    if (
+      pointerId !== undefined &&
+      event.pointerType === "pen" &&
+      activePointerType === "touch" &&
+      !panDrag &&
+      active &&
+      active.points.length <= 4 &&
+      performance.now() - activeStartedAt < 250
+    ) {
+      const staleId = pointerId;
+      active = undefined;
+      activeDraftId = undefined;
+      activePointerType = undefined;
+      pointerId = undefined;
+      try {
+        if (inkCanvas.hasPointerCapture(staleId)) inkCanvas.releasePointerCapture(staleId);
+      } catch {}
+    }
+    if (pointerId !== undefined) return;
     if (event.pointerType === "mouse" && event.button !== 0 && !rightButton) return;
     event.preventDefault();
     viewport.focus({ preventScroll: true });
     pointerId = event.pointerId;
+    activePointerType = event.pointerType;
+    activeStartedAt = performance.now();
     try { inkCanvas.setPointerCapture(event.pointerId); } catch {}
     if (rightButton || state.tool === "hand") {
       panDrag = { x: event.clientX, y: event.clientY, pan: currentDraft().pan, rightButton };
@@ -482,6 +509,7 @@ export function mountSheet(
     }
     commitActive();
     pointerId = undefined;
+    activePointerType = undefined;
     try {
       if (inkCanvas.hasPointerCapture(event.pointerId)) {
         inkCanvas.releasePointerCapture(event.pointerId);
@@ -495,7 +523,11 @@ export function mountSheet(
   for (const name of ["pointerup", "pointercancel", "lostpointercapture"] as const) {
     inkCanvas.addEventListener(name, finish, { signal });
   }
+  inkCanvas.addEventListener("touchstart", event => {
+    if (event.touches.length > 1 && event.cancelable) event.preventDefault();
+  }, { signal, passive: false });
   inkCanvas.addEventListener("contextmenu", event => event.preventDefault(), { signal });
+  viewport.addEventListener("gesturestart", event => event.preventDefault(), { signal });
   viewport.addEventListener("wheel", event => event.preventDefault(), { signal, passive: false });
 
   const unsubscribe = sheets.onChange(render);

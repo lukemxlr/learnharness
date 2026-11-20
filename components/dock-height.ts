@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, type RefObject } from "react";
+import { subscribeVisualViewport } from "./visual-viewport";
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
@@ -52,14 +53,23 @@ const pixels = (value: string) => Number.parseFloat(value) || 0;
  * and when the outer viewport is already capped. */
 export function syncDockHeight(elements: DockHeightElements, expanded: boolean) {
 	const { column, block, viewport, body, shell, content } = elements;
-	// QuestionDock keeps a laid-out form in an invisible h-0 wrapper;
-	// PracticeDock removes its form. Neither hidden form is a height input.
+	// QuestionDock and PracticeDock keep their forms mounted while collapsed;
+	// neither hidden form is a height input while !expanded.
 	const question = expanded ? content.querySelector<HTMLElement>("[data-dock-scroll-area]") : null;
 	const height = (el: HTMLElement) => el.getBoundingClientRect().height;
 	const shellStyle = getComputedStyle(shell);
 	const questionStyle = question ? getComputedStyle(question) : null;
+	let effectiveColumnHeight = column.clientHeight;
+	const vv = column.ownerDocument?.defaultView?.visualViewport;
+	if (vv && vv.height > 0) {
+		const colRect = column.getBoundingClientRect();
+		const vvTop = vv.offsetTop ?? 0;
+		const vvBottom = vvTop + vv.height;
+		const visibleColumnH = Math.max(0, Math.min(colRect.bottom, vvBottom) - Math.max(colRect.top, vvTop));
+		effectiveColumnHeight = Math.min(effectiveColumnHeight, visibleColumnH);
+	}
 	const budget = dockHeightBudget({
-		columnHeight: column.clientHeight,
+		columnHeight: effectiveColumnHeight,
 		outsideHeight: Math.max(height(block) - height(viewport), 0),
 		beforeShellHeight: Math.max(height(body) - height(shell), 0),
 		shellBorderHeight: pixels(shellStyle.borderTopWidth) + pixels(shellStyle.borderBottomWidth),
@@ -141,11 +151,11 @@ export function useDockHeight({
 		}
 		const question = expanded ? contentRef.current?.querySelector("[data-dock-scroll-area]") : null;
 		if (question) observer.observe(question);
-		window.addEventListener("resize", observedMeasure);
+		const offVv = subscribeVisualViewport(window, observedMeasure);
 		return () => {
 			active = false;
 			observer.disconnect();
-			window.removeEventListener("resize", observedMeasure);
+			offVv();
 		};
 	}, [measure, mode, expanded, scrollRef, blockRef, viewportRef, bodyRef, contentRef]);
 }

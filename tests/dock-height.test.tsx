@@ -159,17 +159,16 @@ describe("measured question/practice DOM and observer lifecycle", () => {
 			await render({ expanded: true, inspected: block => assert.equal(block.style.getPropertyValue("--dock-max-h"), "406px") });
 		});
 	});
-	it("reconnects to practice's newly mounted question after collapsing and revealing", async () => {
+	it("keeps practice's hidden question mounted across collapse and sizes it synchronously on reveal", async () => {
 		await withFixture(async (host, render) => {
-			Object.assign(sizes, { block: 104, viewport: 44, body: 44, shell: 44, content: 42 });
+			Object.assign(sizes, { block: 104, viewport: 44, body: 44, shell: 44, content: 42, question: 2000 });
 			await render({ practice: true, expanded: false });
-			const collapsedObserver = observers.at(-1)!;
-			assert.equal(host.querySelector('[data-dock-scroll-area]'), null);
+			assert.ok(host.querySelector('[data-dock-scroll-area]'), "practice form remains mounted so drafts survive collapse/resize");
+			assert.equal(part(host, "block").style.getPropertyValue("--dock-max-h") || "", "");
+			assert.equal(part(host, "viewport").style.overflowY, "visible");
 			resetSizes();
-			await render({ practice: true, expanded: true });
-			assert.equal(collapsedObserver.disconnected, true);
+			await render({ practice: true, expanded: true, inspected: block => assert.equal(block.style.getPropertyValue("--dock-max-h"), "406px") });
 			assert.ok(observers.at(-1)!.elements.has(host.querySelector('[data-dock-scroll-area]')!));
-			assert.equal(part(host, "block").style.getPropertyValue("--dock-max-h"), "406px");
 		});
 	});
 	it("intentionally uncaps the question for a short window, then restores the measured cap on growth", async () => {

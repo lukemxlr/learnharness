@@ -245,7 +245,7 @@ export function QuestionDockBar({
 				type="button"
 				data-testid="teach-check-reveal"
 				onClick={onExpand}
-				className="dock-variant flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/40"
+				className="dock-variant flex min-h-11 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/40"
 			>
 				<span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
 					<PlayIcon className="size-3.5" />
@@ -267,7 +267,7 @@ export function QuestionDockBar({
 			type="button"
 			data-testid="question-dock-bar"
 			onClick={onExpand}
-			className="dock-variant flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors hover:bg-accent/40"
+			className="dock-variant flex min-h-11 w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors hover:bg-accent/40"
 		>
 			<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{label ??
@@ -700,7 +700,7 @@ function QuestionDockForm({
 									data-kbdrow={i}
 									onClick={() => toggle(i)}
 									className={cn(
-										"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
+										"flex min-h-11 items-start gap-3 rounded-lg border px-3 py-2.5 text-left text-sm outline-none transition-colors",
 										isSel ? "border-primary bg-accent" : "hover:bg-accent/50",
 										i === kbdIdx && !isSel && "ring-1 ring-border bg-accent/40",
 									)}
@@ -748,14 +748,14 @@ function QuestionDockForm({
 								className={cn(
 									// Option-row layout + radio circle (owner); the dashed
 									// outline stays — this is the deliberate non-answer.
-									"flex items-start gap-3 rounded-lg border border-dashed px-3 py-2 text-left text-sm outline-none transition-colors",
+									"flex min-h-11 items-center gap-3 rounded-lg border border-dashed px-3 py-2.5 text-left text-sm outline-none transition-colors",
 									sel.dontKnow ? "border-primary text-foreground" : "text-muted-foreground",
 									kbdIdx === optionCount && !sel.dontKnow && "ring-1 ring-border bg-accent/40",
 								)}
 							>
 								<span
 									className={cn(
-										"mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+										"flex size-4 shrink-0 items-center justify-center rounded-full border",
 										sel.dontKnow
 											? "border-primary bg-primary text-primary-foreground"
 											: "border-muted-foreground/40",
@@ -775,7 +775,7 @@ function QuestionDockForm({
 								data-kbdrow={optionCount}
 								onClick={selectOther}
 								className={cn(
-									"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
+									"flex min-h-11 items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
 									sel.otherSelected ? "border-primary bg-accent" : "border-dashed hover:bg-accent/50",
 									kbdIdx === optionCount && !sel.otherSelected && "ring-1 ring-border bg-accent/40",
 								)}
@@ -868,19 +868,9 @@ function QuestionDockForm({
 							Confidence
 						</span>
 						<div
-							className={cn("relative h-4 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
+							className={cn("relative h-11 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
 							data-testid="confidence-track"
 						>
-							{/* The RAIL is painted here, not on the input: this overlay spans
-								exactly the thumb-CENTER range (inset 8px = half the 16px disc,
-								left and right), so at 0 and 100 the disc sits flush against the
-								rail's very ends — no bare stub poking past it (owner round 4).
-								STACKING LAW (owner round 5): the input is absolute too — a
-								positioned overlay paints above an in-flow input no matter the
-								DOM order, which put the rail OVER the disc. Both positioned,
-								input later in DOM → the disc rides on top. The wrapper's height
-								is pinned (h-4) so the rail's top-1/2 and the disc's track share
-								one box — centered by construction, not by hope. */}
 							<div
 								aria-hidden
 								data-testid="confidence-rail"
@@ -899,11 +889,6 @@ function QuestionDockForm({
 								title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
 								data-testid="confidence-slider"
 								onChange={(e) => {
-									// Snap to the nearest stop; the rendered VALUE is the stop's own
-									// percent, so the thumb always rests at its true fraction (50 =
-									// halfway). Keyboard needs no handler here: the dock machine treats
-									// a focused range as non-typing (see the guard above) and its ←/→
-									// branch preventDefaults, which also cancels the native 1% step.
 									const v = Number(e.target.value);
 									let best = 0;
 									for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
@@ -913,10 +898,10 @@ function QuestionDockForm({
 								}}
 								style={{ color: CONFIDENCE_COLORS[confIdx] }}
 								className={cn(
-									"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
-									"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
-									"[&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
-									"[&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent",
+									"absolute inset-0 h-11 w-full cursor-pointer appearance-none bg-transparent outline-none",
+									"[&::-webkit-slider-runnable-track]:h-11 [&::-webkit-slider-runnable-track]:bg-transparent",
+									"[&::-webkit-slider-thumb]:mt-[13.5px] [&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
+									"[&::-moz-range-track]:h-11 [&::-moz-range-track]:bg-transparent",
 									"[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current",
 								)}
 							/>
@@ -1053,7 +1038,7 @@ function QuestionDockForm({
 						>
 							<ImagePlusIcon className="size-4" />
 						</button>
-						<span aria-hidden className="pl-1 text-xs text-muted-foreground">
+						<span aria-hidden className={cn("pl-1 text-xs text-muted-foreground", !compactionRunning && "hidden sm:inline")}>
 								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
 						</span>
 						<Button
