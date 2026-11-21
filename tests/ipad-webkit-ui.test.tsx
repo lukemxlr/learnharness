@@ -291,6 +291,7 @@ describe("M5 iPadOS / WebKit UI & Responsive Primitives", () => {
 		const aside = document.querySelector<HTMLElement>("aside")!;
 		assert.equal(aside.getAttribute("data-drawer"), "true", "820px portrait uses overlay drawer mode");
 		assert.equal(aside.getAttribute("aria-hidden"), "true", "drawer starts closed on narrow/tablet viewport");
+		assert.ok(aside.classList.contains("hidden"), "closed overlay drawer stays display:none instead of an offscreen fixed box");
 		assert.equal(document.querySelector('[data-testid="sidebar-backdrop"]'), null);
 
 		// Open drawer via Open sidebar button -> backdrop + dialog semantics + session-row-more touch button

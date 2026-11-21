@@ -62,7 +62,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
-import { useVisualViewport } from "@/components/visual-viewport";
+import { readVisualViewport, subscribeVisualViewport, syncVisualViewportVars } from "@/components/visual-viewport";
 const SIDEBAR_AUTOCLOSE = 928;
 const DRAWER_BREAKPOINT = 1024;
 
@@ -125,7 +125,12 @@ export function useSidebar() {
 }
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-	useVisualViewport(true);
+	useEffect(() => {
+		if (typeof window === "undefined" || typeof document === "undefined") return;
+		const sync = () => syncVisualViewportVars(document, readVisualViewport(window));
+		sync();
+		return subscribeVisualViewport(window, sync);
+	}, []);
 	const hub = useNotifyHub();
 	useEffect(() => {
 		const bridge = window.lh?.chatgpt;
@@ -178,7 +183,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			setNarrow(window.innerWidth < SIDEBAR_AUTOCLOSE);
 			setIsDrawer(false);
 		} else {
-			const drawer = window.innerWidth < DRAWER_BREAKPOINT;
+			const cw = document.documentElement.clientWidth;
+			const vw = cw > 0 ? Math.min(window.innerWidth, cw) : window.innerWidth;
+			const drawer = vw < DRAWER_BREAKPOINT;
 			setIsDrawer(drawer);
 			if (drawer) setDrawerOpen(false);
 		}
@@ -195,7 +202,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 				setNarrow(window.innerWidth < SIDEBAR_AUTOCLOSE);
 				return;
 			}
-			const nextDrawer = window.innerWidth < DRAWER_BREAKPOINT;
+			const cw = document.documentElement.clientWidth;
+			const vw = cw > 0 ? Math.min(window.innerWidth, cw) : window.innerWidth;
+			const nextDrawer = vw < DRAWER_BREAKPOINT;
 			setIsDrawer((prev) => {
 				if (nextDrawer && !prev) setDrawerOpen(false);
 				return nextDrawer;
@@ -253,10 +262,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		return () => window.removeEventListener(event, onToggle);
 	}, [toggle]);
 
+	const sidebarContextValue = useMemo(
+		() => ({ open: effectiveOpen, isDrawer, toggle, closeDrawer }),
+		[effectiveOpen, isDrawer, toggle, closeDrawer],
+	);
+
 	return (
-		<SidebarContext.Provider value={{ open: effectiveOpen, isDrawer, toggle, closeDrawer }}>
+		<SidebarContext.Provider value={sidebarContextValue}>
 			{/* transitions gated on mount: no slide-in flash on page load */}
-			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity,transform]")}>{children}</div>
+			<div className={cn("flex h-dvh w-full overflow-x-clip", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity,transform]")}>{children}</div>
 		</SidebarContext.Provider>
 	);
 }
@@ -964,11 +978,10 @@ function SessionsSidebar() {
 			className={cn(
 				"sidebar-motion duration-200",
 				isDrawer
-					? cn(
-							"fixed inset-y-0 left-0 z-50 w-[min(18rem,calc(100vw-3rem))] max-w-full overflow-hidden shadow-2xl",
-							open ? "visible translate-x-0 opacity-100" : "pointer-events-none invisible -translate-x-full opacity-0",
-						)
-					: cn("shrink-0 overflow-hidden", open ? "w-72" : "w-0"),
+					? open
+						? "fixed inset-y-0 left-0 z-50 w-[min(18rem,calc(100vw-3rem))] max-w-full overflow-hidden shadow-2xl visible translate-x-0 opacity-100"
+						: "hidden"
+					: cn("shrink-0 overflow-hidden", !IS_ELECTRON && "max-lg:hidden", open ? "w-72" : "w-0"),
 			)}
 			aria-hidden={!open}
 		>

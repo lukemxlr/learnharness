@@ -251,3 +251,18 @@ it("a visible tooltip cannot preempt CommitInput Escape's field blur/save path o
 	field.value = "retained"; await f.event(field, "input"); await f.event(field, "keydown", { key: "Escape" });
 	assert.deepEqual(commits, ["retained"]); assert.equal(closes, 0); assert.ok(document.querySelector("[role='dialog']"));
 });
+
+it("does not pop a tooltip on pointer-driven focus restoration, re-enables focus tooltips after keyboard input, and closes on window resize", async () => {
+	const f = fixture();
+	await f.render(<TooltipProvider>{hint("one")}<button type="button" data-testid="other">Other</button></TooltipProvider>);
+	const trigger = element("[data-testid='trigger-one']");
+	const other = element("[data-testid='other']");
+	await f.event(other, "pointerdown");
+	await f.focus(trigger);
+	assert.equal(content("one"), null, "programmatic focus return after a pointer click/tap does not leave a floating tooltip open");
+	await f.event(other, "keydown", { key: "Tab" });
+	await f.focus(trigger);
+	assert.equal(content("one")?.dataset.state, "instant-open", "keyboard navigation opens the focus tooltip immediately");
+	await act(async () => { f.dom.window.dispatchEvent(new f.dom.window.Event("resize")); });
+	assert.equal(content("one"), null, "window resize dismisses open passive tooltips");
+});

@@ -29,6 +29,39 @@ if (!exists(path.join(STANDALONE, "server.js"))) {
 	process.exit(1);
 }
 
+// 0) Reverse-proxy header boundary: Next.js builds request.url / request.nextUrl
+// from X-Forwarded-Proto/Host before proxy.ts or route handlers execute. Strip
+// untrusted forwarded headers at the raw HTTP server layer unless LH_TRUST_PROXY=1.
+const PROXY_GUARD_SENTINEL = "/* lh-proxy-header-guard */";
+const PROXY_GUARD_WRAPPER = `${PROXY_GUARD_SENTINEL}
+import http from "node:http";
+
+if (process.env.LH_TRUST_PROXY !== "1") {
+	const origEmit = http.Server.prototype.emit;
+	http.Server.prototype.emit = function (event, req, ...rest) {
+		if (event === "request" && req && req.headers) {
+			delete req.headers["x-forwarded-proto"];
+			delete req.headers["x-forwarded-host"];
+			delete req.headers["x-forwarded-port"];
+			delete req.headers["forwarded"];
+		}
+		return origEmit.call(this, event, req, ...rest);
+	};
+}
+
+await import("./next-server.js");
+`;
+const standaloneServerPath = path.join(STANDALONE, "server.js");
+const standaloneNextServerPath = path.join(STANDALONE, "next-server.js");
+const currentServerSource = fs.readFileSync(standaloneServerPath, "utf8");
+if (!currentServerSource.includes(PROXY_GUARD_SENTINEL)) {
+	fs.writeFileSync(standaloneNextServerPath, currentServerSource, "utf8");
+	fs.writeFileSync(standaloneServerPath, PROXY_GUARD_WRAPPER, "utf8");
+} else if (!exists(standaloneNextServerPath)) {
+	console.error("[build-server] .next/standalone/next-server.js missing behind proxy guard wrapper — re-run `next build`.");
+	process.exit(1);
+}
+
 // 1) Static assets: public/ → standalone/public, .next/static → standalone/.next/static
 const staticFrom = path.join(ROOT, ".next", "static");
 const staticTo = path.join(STANDALONE, ".next", "static");

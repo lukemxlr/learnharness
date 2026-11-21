@@ -190,9 +190,12 @@ export function PluginTopBarActions({ context, captureContext }: { context: Extr
 
 	if (!actions.length) return null;
 	return <div ref={root} data-testid="plugin-top-bar-actions" className="lh-no-drag relative flex shrink-0 items-center gap-1">
-		{/* Off-flow intrinsic probes never create focus targets or drag-mask holes. */}
-		<div ref={probes} aria-hidden="true" className="pointer-events-none invisible fixed left-0 top-0 flex w-max gap-1">
-			{actions.map(item => <span key={item.key} className={TOP_BUTTON}><ActionIcon action={item.action} /><span className="min-w-0 truncate max-[420px]:sr-only">{item.action.name}</span></span>)}
+		{/* Off-flow intrinsic probes never create focus targets, drag-mask holes,
+		    or a permanent position:fixed box that triggers mobile WebKit viewport scaling. */}
+		<div aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 size-0 overflow-hidden">
+			<div ref={probes} className="flex w-max gap-1">
+				{actions.map(item => <span key={item.key} className={TOP_BUTTON}><ActionIcon action={item.action} /><span className="min-w-0 truncate max-[420px]:sr-only">{item.action.name}</span></span>)}
+			</div>
 		</div>
 		{actions.slice(0, count).map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} className={TOP_BUTTON} />)}
 		{excess.length > 0 && <Hint label="More plugin actions" side="bottom"><button ref={trigger} type="button" title="More plugin actions" aria-label="More plugin actions"

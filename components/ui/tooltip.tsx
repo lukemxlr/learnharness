@@ -23,6 +23,17 @@ type ProviderState = {
 }
 const ProviderContext = React.createContext<ProviderState | null>(null)
 const openObservers = new Set<(identity: object) => void>()
+const lastInputModality = new WeakMap<Document, "pointer" | "keyboard">()
+const observedDocuments = new WeakSet<Document>()
+function observeInputModality(doc: Document | null | undefined) {
+  if (!doc || observedDocuments.has(doc)) return
+  observedDocuments.add(doc)
+  doc.addEventListener("pointerdown", () => { lastInputModality.set(doc, "pointer") }, true)
+  doc.addEventListener("keydown", (event: KeyboardEvent) => {
+    if (event.key === "Shift" || event.key === "Control" || event.key === "Alt" || event.key === "Meta") return
+    lastInputModality.set(doc, "keyboard")
+  }, true)
+}
 const noSubscribe = () => () => {}
 const emptySnapshot = () => null
 
@@ -174,6 +185,7 @@ const TooltipTrigger = React.forwardRef<HTMLButtonElement, React.ComponentPropsW
   const pointerMoved = React.useRef(false)
   const { setTrigger } = context
   const ref = React.useCallback((node: HTMLButtonElement | null) => {
+    if (node) observeInputModality(node.ownerDocument)
     setTrigger(node)
     const cleanup = setRef(forwardedRef, node)
     if (typeof cleanup === "function") return () => { setTrigger(null); cleanup() }
@@ -197,7 +209,12 @@ const TooltipTrigger = React.forwardRef<HTMLButtonElement, React.ComponentPropsW
       pointerDown.current = true
       document.addEventListener("pointerup", pointerUp, { once: true })
     }}
-    onFocus={event => { onFocus?.(event); if (!event.defaultPrevented && !pointerDown.current) context.immediate() }}
+    onFocus={event => {
+      onFocus?.(event)
+      if (event.defaultPrevented || pointerDown.current) return
+      if (lastInputModality.get(event.currentTarget.ownerDocument) === "pointer") return
+      context.immediate()
+    }}
     onBlur={event => { onBlur?.(event); if (!event.defaultPrevented) context.close() }}
     onClick={event => { onClick?.(event); if (!event.defaultPrevented) context.close() }}
   /></Popper.Anchor>
@@ -232,8 +249,13 @@ const PositionedContent = React.forwardRef<HTMLDivElement, ContentProps>(functio
   React.useEffect(() => {
     if (!trigger) return
     const scroll = (event: Event) => { if (event.target instanceof Node && event.target.contains(trigger)) latest.current.close() }
+    const resize = () => { latest.current.close() }
     window.addEventListener("scroll", scroll, true)
-    return () => window.removeEventListener("scroll", scroll, true)
+    window.addEventListener("resize", resize)
+    return () => {
+      window.removeEventListener("scroll", scroll, true)
+      window.removeEventListener("resize", resize)
+    }
   }, [trigger])
   React.useEffect(() => {
     let click: (() => void) | null = null

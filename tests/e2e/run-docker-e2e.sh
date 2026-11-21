@@ -69,25 +69,47 @@ if [[ "$BUILD_APP" -eq 1 ]]; then
   APP_BUILD_DIR="$WORK_DIR/app"
   echo "[e2e] Syncing $REPO_DIR -> $APP_BUILD_DIR for Node 26 standalone build..."
   mkdir -p "$APP_BUILD_DIR"
-  find "$APP_BUILD_DIR" -mindepth 1 -maxdepth 1 ! -name "node_modules" -exec rm -rf {} +
+  LOCK_HASH="$(cat "$REPO_DIR/package-lock.json" "$REPO_DIR"/plugins/*/package-lock.json "$REPO_DIR/scripts/build-plugin-types.mjs" 2>/dev/null | sha256sum | awk '{print $1}')"
+  PREV_HASH=""
+  if [[ -f "$APP_BUILD_DIR/.lh-deps-hash" ]]; then
+    PREV_HASH="$(cat "$APP_BUILD_DIR/.lh-deps-hash")"
+  fi
+  if [[ "$LOCK_HASH" == "$PREV_HASH" && -d "$APP_BUILD_DIR/node_modules" && -d "$APP_BUILD_DIR/plugins/drawing-pad/node_modules" ]]; then
+    # Keep cached root and plugin node_modules; refresh all repo sources cleanly.
+    find "$APP_BUILD_DIR" -mindepth 1 -maxdepth 1 ! -name "node_modules" ! -name "plugins" ! -name ".lh-deps-hash" -exec rm -rf {} +
+    if [[ -d "$APP_BUILD_DIR/plugins" ]]; then
+      for pdir in "$APP_BUILD_DIR/plugins"/*; do
+        [[ -d "$pdir" ]] || continue
+        find "$pdir" -mindepth 1 -maxdepth 1 ! -name "node_modules" ! -name ".sdk" -exec rm -rf {} +
+      done
+    fi
+  else
+    find "$APP_BUILD_DIR" -mindepth 1 -maxdepth 1 ! -name "node_modules" -exec rm -rf {} +
+  fi
   tar -C "$REPO_DIR" \
-    --exclude=".git" \
+    --exclude="./.git" \
     --exclude="node_modules" \
-    --exclude=".next" \
-    --exclude="data" \
-    --exclude="dist" \
-    --exclude="auth.json" \
-    --exclude="user-auth.json*" \
-    --exclude="*-credentials.json*" \
-    --exclude=".env*" \
+    --exclude="./.next" \
+    --exclude="./data" \
+    --exclude="./dist" \
+    --exclude="./auth.json" \
+    --exclude="./user-auth.json*" \
+    --exclude="./*-credentials.json*" \
+    --exclude="./.env*" \
     -cf - . | tar -C "$APP_BUILD_DIR" -xf -
 
-  echo "[e2e] Installing app dependencies & building standalone server under Node 26..."
+  echo "[e2e] Building standalone server under Node 26..."
   (
     cd "$APP_BUILD_DIR"
     export PATH="/opt/node26/bin:$PATH"
-    npm ci --no-audit --no-fund
-    npm run plugins:setup
+    if [[ "$LOCK_HASH" != "$PREV_HASH" || ! -d "$APP_BUILD_DIR/node_modules" || ! -d "$APP_BUILD_DIR/plugins/drawing-pad/node_modules" ]]; then
+      echo "[e2e] Installing app & plugin dependencies (lockfile changed or cold cache)..."
+      npm ci --no-audit --no-fund
+      npm run plugins:setup
+      printf '%s' "$LOCK_HASH" > "$APP_BUILD_DIR/.lh-deps-hash"
+    else
+      echo "[e2e] Reusing cached Node 26 dependencies (lockfile hash matched)."
+    fi
     npm run build
     "$NODE26_BIN" scripts/build-server.mjs
   )

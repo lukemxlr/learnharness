@@ -173,12 +173,14 @@ describe("desktop standalone payload", () => {
 	});
 
 	it("accepts a clean payload and is idempotent", () => {
-		withPayload(({ run }) => {
+		withPayload(({ root, run }) => {
 			for (let i = 0; i < 2; i++) {
 				const result = run();
 				assert.equal(result.status, 0, String(result.stderr));
 				assert.match(String(result.stdout), /server payload ready/);
 			}
+			assert.match(fs.readFileSync(path.join(root, STANDALONE, "server.js"), "utf8"), /lh-proxy-header-guard/);
+			assert.equal(fs.readFileSync(path.join(root, STANDALONE, "next-server.js"), "utf8"), "fixture");
 		});
 	});
 
