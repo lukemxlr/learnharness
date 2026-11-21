@@ -1,8 +1,23 @@
 # Branch Status — `feat/lxc-server-ipad-draw-migration`
 
-## Current status (2026-11-20)
+## Current status (2026-11-21)
 
-The iPadOS Safari implementation in `7298239` has follow-up fixes in the working tree for editor and sign-in readiness. Rotation and integration acceptance remain open. See the [developer handover](developer-handover.md#42-milestone-verification-status) for acceptance results and the [manual checklist](../tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md) for the physical iPad, Windows VM, and live LXC checks.
+All automated implementation, upstream merge, and Docker acceptance gates are **PASS** on `feat/lxc-server-ipad-draw-migration`:
+
+- **Upstream `v0.7.0` Merge (`269afdf2`):** Merged `origin/main` (`069a6a11`, `learnharness@0.7.0`, `Next.js 16.4.6`). Pre-merge rollback preserved at branch `backup/pre-v0.7.0-merge` and tag `pre-v0.7.0-merge` (`9e37b90c`).
+- **Acceptance Blockers Resolved (`5f7e8f68`, `6bdbe6eb`, `17591263`, `6703fd02`, `ccf354c7`):**
+  - `T2-F3-02` (untrusted forwarded headers): `scripts/build-server.mjs` now wraps the standalone entrypoint (`server.js` → `server.next.cjs`) and strips `x-forwarded-*` / `forwarded` headers whenever `LH_TRUST_PROXY !== "1"`.
+  - `T1-F11-04` / `T2-F12-04` / `T2-F12-06` / `T4-04` (WebKit mobile viewport lockup & scale drift): added `minimumScale: 1` in `app/layout.tsx` (keeping pinch-zoom unrestricted), replaced native `placeholder` on `session-search` with an accessible overlay + deferred mount transition in `components/sidebar.tsx`, and aligned E2E helpers/specs with `v0.7.0` behavior.
+- **Automated Docker Verification (`Node 26.13.1` + Playwright WebKit `Node 20.16.0`):**
+  - `npm run typecheck`: Exit `0` (`0` errors)
+  - `npm run lint`: Exit `0` (`0` errors, `1` pre-existing warning in `tests/source-name-ui.test.tsx:27:45`)
+  - `plugins/drawing-pad` (`typecheck` + `test`): **`75/75` PASS**
+  - Full repository unit/integration suite: **`5,644/5,644` PASS** (`0` failures, `4` pre-existing OS/fs skips)
+  - Standalone production build (`Next.js 16.4.6`, 4 core plugins + authoring skill) + `scripts/build-server.mjs`: **PASS** (`0` leaked secret/data files)
+  - All 5 smoke scripts (`smoke-provider-runtime`, `smoke-demo-runtime`, `smoke-compression-runtime`, `smoke-server --isolated`, `smoke-core-plugins`): **ALL PASS**
+  - Full Playwright WebKit E2E acceptance suite (`--build-app --all --workers=2` on `ccf354c7`): **`167/167` PASS (`0` failed, `0` timeouts, `27.7m`)**
+
+See the [developer handover](developer-handover.md#42-milestone-verification-status) for detailed verification results and the [manual checklist](../tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md) for the remaining physical iPad, Windows VM, and live LXC cutover checks.
 
 ## Checkpoint from 2026-11-19
 
@@ -60,14 +75,14 @@ The iPadOS Safari implementation in `7298239` has follow-up fixes in the working
   - **E2E Note**: Core plugins default disabled per `tests/core-plugins.test.ts`, so E2E Drawing Pad runs must enable `drawing-pad` via `plugins-state.json` or `PUT /api/plugins/drawing-pad`.
 - **`M-E2E-1` & `M-E2E-2` — Gate 18 & Gate 19 PASS (Committed in Checkpoint)**: Isolated Playwright WebKit harness (`tests/e2e/**`) and synthetic fixtures (`tests/fixtures/e2e-synthetic/**`) with `167` Tiers 1–4 specs across `11` files under `tests/e2e/**`, `21/21` Dual-Node ESM, `--selfcheck 15/15`, Auditors CLEAN — now committed in this checkpoint.
 
-## Interrupted by Urgent Laptop Shutdown (Partially Completed & Committed Here)
-- **`R7` English Documentation Draft (`docs/setup-and-operation.md`, `docs/developer-handover.md`, `docs/README.md`)**: Completed initial draft by `worker_r7_docs` (`396d5195`, link- & privacy-checked, retaining `[PENDING FINAL M5/M6 RUN — update after M5/M6 Gate]` markers).
-- **`M5` (iPadOS Safari / WebKit UI & Responsive Matrix — R4)**: 3 parallel Explorers completed (`dbb9bc62`, `0d848c12`, `5ad38e31` in brain scratch); implementation interrupted before code edits.
+- **`M5` (iPadOS Safari / WebKit UI & Responsive Matrix — R4) — PASS (`7298239`, `9e37b90c`, `5f7e8f68`, `17591263`)**: Responsive drawer navigation, safe-area clearance, `visualViewport` keyboard avoidance, touch controls, editor/sign-in readiness guards, and mobile WebKit viewport scaling stability verified across all portrait, landscape, Split View (`375px` / `507px` / `320px`), and rotation scenarios.
+- **Upstream `v0.7.0` Merge (`269afdf2`) & Proxy Guard (`5f7e8f68`) — PASS**: Integrated `origin/main` (`069a6a11`, `Next.js 16.4.6`) cleanly with pre-merge rollback `backup/pre-v0.7.0-merge` / tag `pre-v0.7.0-merge` (`9e37b90c`); resolved `T2-F3-02` via the `scripts/build-server.mjs` proxy-header guard wrapper.
+- **Combined Final Acceptance Gate (`M-E2E-3` + `M6`) & `R7` Docs — PASS (`ccf354c7`)**: `typecheck` `0`, `lint` `0`, `plugins/drawing-pad` `75/75`, full repo suite `5,644/5,644` (`0` failed, `4` pre-existing OS/fs skips), standalone build + 5 smoke scripts + `0` leaks, and full Playwright WebKit E2E **`167/167` PASS (`0` failed, `0` timeouts, `27.7m`)**.
 
-## Remaining Next Session (Concrete Resume Order)
-1. **Complete `M5` (iPadOS Safari / WebKit UI & responsive matrix)** per `2026-11-19T18:54:36Z` Gate threshold (`REQUEST_CHANGES`/`REJECT` only for functional/security/data-loss/WebKit-layout bugs) -> local commit.
-2. **Finalize `R7` docs** (`docs/developer-handover.md` M5/M6 sections + `docs/setup-and-operation.md` review).
-3. **Run Combined Final Acceptance Gate (`M-E2E-3` + `M6`)**: `167` E2E specs with `drawing-pad` enabled in E2E harness + single full 708-suite `npm test` & standalone `next build` + `smoke` inside container-internal `/tmp/lh-run` copy (no duplicate Reviewer full-suite re-runs) -> Victory Audit.
-4. **Open user/hardware/LXC end-tests** (`tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md`): isolated Windows VM Electron/installer/`Ctrl+V`, real iPadOS Safari/Apple Pencil, live Proxmox LXC + Cloudflare Tunnel + ChatGPT OAuth + real profile migration.
+## Remaining Manual User Verification (Hardware / VM / Live LXC)
+- Run the physical hardware, isolated Windows VM, and live LXC cutover checks in [`tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md`](../tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md):
+  1. Isolated Windows VM Electron x64 NSIS installer, `setup.html` / `remote-reconnect.html`, and native `Win+Shift+S` + `Ctrl+V` paste.
+  2. Physical iPadOS Safari + Apple Pencil palm rejection, native keyboard / safe-area clearance, and Photo Library / Files pickers.
+  3. Live Proxmox LXC + `systemd` + Cloudflare Tunnel + headless ChatGPT Plus OAuth + real Windows → LXC `--dry-run` → `--apply` profile migration cutover.
 
 See `PROJECT.md` at repository root for architecture contracts and baseline design notes.

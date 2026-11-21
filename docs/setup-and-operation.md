@@ -50,7 +50,7 @@ sudo cp -a .next/standalone /opt/learnharness/standalone
 sudo chown -R learnharness:learnharness /opt/learnharness/standalone
 ```
 
-> **Note:** `scripts/build-server.mjs` copies `.next/static/`, `public/`, `scripts/plugin-loader.cjs`, `core-plugins/`, and authoring assets into `.next/standalone/`, validates prompt assets, and aborts if any `data/`, `auth.json`, `user-auth.json*`, `*-credentials.json*`, or `.env*` file leaked into the bundle.
+> **Note:** `scripts/build-server.mjs` copies `.next/static/`, `public/`, `scripts/plugin-loader.cjs`, `core-plugins/`, and authoring assets into `.next/standalone/`, wraps the standalone entrypoint (`server.js` → `server.next.cjs`) to strip untrusted `X-Forwarded-*` / `Forwarded` headers unless `LH_TRUST_PROXY=1`, validates prompt assets, and aborts if any `data/`, `auth.json`, `user-auth.json*`, `*-credentials.json*`, or `.env*` file leaked into the bundle.
 
 ### 1.3 Environment configuration (`/etc/learnharness/learnharness.env`)
 
@@ -73,7 +73,7 @@ Supported environment variables:
 | `LH_DATA_DIR` | `/var/lib/learnharness/data` | Persistent directory for chats, knowledge graph, attachments, jobs, settings, prompt overrides, themes, and core-plugin data. |
 | `LH_AUTH_FILE` | `/var/lib/learnharness/auth/auth.json` | BYOK provider key store (`{VAR: value}`, mode `0600`). `user-auth.json` and `*-credentials.json` are stored in the same directory (`dirname(LH_AUTH_FILE)`). |
 | `LH_ALLOWED_HOSTS` | `learn.example.com,learnharness.local` | Comma-separated case-insensitive hostnames (ports ignored, no wildcards) permitted alongside `localhost` and IP literals. |
-| `LH_TRUST_PROXY` | `1` | Honors `X-Forwarded-Proto` and `X-Forwarded-Host` from Cloudflare Tunnel / reverse proxies for `Secure` cookies, CSRF origin validation, and `/login` redirects. |
+| `LH_TRUST_PROXY` | `1` | Honors `X-Forwarded-Proto` and `X-Forwarded-Host` from Cloudflare Tunnel / reverse proxies for `Secure` cookies, CSRF origin validation, and `/login` redirects. When unset or `0`, the standalone server wrapper strips incoming `X-Forwarded-*` and `Forwarded` headers before Next.js reads them. |
 | `LH_REQUIRE_AUTH` | `1` | Enforces single-account login on pages, APIs, streams, and attachments (`user-auth.json` must be initialized). |
 | `LH_STREAM_KEEPALIVE_MS` | `15000` (optional) | Interval in milliseconds (`50`–`2147483647`) for SSE `: ping\n\n` and NDJSON `{"type":"ping"}\n` keepalive frames during active turns and side-chat streams. |
 
