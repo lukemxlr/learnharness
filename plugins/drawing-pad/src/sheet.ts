@@ -12,7 +12,7 @@ import {
   type Point,
   type Stroke,
 } from "./strokes.ts";
-import type { Draft, SessionSheet, Sheets } from "./state.ts";
+import type { Draft, PublishReason, SessionSheet, Sheets } from "./state.ts";
 import { INK_COLORS, resolvePaperTheme, resolveStrokeColor, type PaperTheme } from "./theme.ts";
 
 export interface MountedSheet {
@@ -71,6 +71,14 @@ export function mountSheet(
   let activeStartedAt = 0;
   let pointerId: number | undefined;
   let panDrag: { x: number; y: number; pan: Draft["pan"]; rightButton: boolean } | undefined;
+  let canvasFrame: number | undefined;
+
+  const cancelCanvasFrame = () => {
+    if (canvasFrame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(canvasFrame);
+    }
+    canvasFrame = undefined;
+  };
 
   const commitActive = () => {
     const stroke = active;
@@ -307,7 +315,7 @@ export function mountSheet(
   root.append(pillWrap, topbar, errorBanner, questionDrawer, viewport);
   container.append(root);
 
-  const render = () => {
+  const renderChrome = () => {
     if (disposed) return;
     const draft = currentDraft();
     const paper = resolvePaperTheme(draft.paperTheme, sheets.appInk);
@@ -354,8 +362,12 @@ export function mountSheet(
     widthValue.textContent = `${state.strokeWidth}px`;
 
     inkCanvas.style.cursor = panDrag ? "grabbing" : state.tool === "hand" ? "grab" : "crosshair";
+  };
 
-    // Canvas backing buffers and painting
+  const renderCanvas = () => {
+    if (disposed) return;
+    const draft = currentDraft();
+    const paper = resolvePaperTheme(draft.paperTheme, sheets.appInk);
     const width = viewport.clientWidth;
     const height = viewport.clientHeight;
     if (!width || !height) return;
@@ -371,6 +383,8 @@ export function mountSheet(
 
     const origin = viewOrigin(width, height, draft.pan, 0);
     const history = active && activeDraftId === draft.id ? [...draft.strokes, active] : draft.strokes;
+    const inkCtx = inkCanvas.getContext("2d", { willReadFrequently: true });
+    if (inkCtx && typeof inkCtx.isContextLost === "function" && inkCtx.isContextLost()) return;
     paintInk(inkCanvas, width, height, history, paper, origin);
 
     gridCanvas.hidden = !draft.grid;
@@ -380,6 +394,26 @@ export function mountSheet(
       const gctx = gridCanvas.getContext("2d");
       gctx?.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
     }
+  };
+
+  const scheduleCanvasRender = () => {
+    if (disposed) return;
+    if (typeof requestAnimationFrame !== "function") {
+      renderCanvas();
+      return;
+    }
+    if (canvasFrame !== undefined) return;
+    canvasFrame = requestAnimationFrame(() => {
+      canvasFrame = undefined;
+      renderCanvas();
+    });
+  };
+
+  const render = () => {
+    if (disposed) return;
+    cancelCanvasFrame();
+    renderChrome();
+    renderCanvas();
   };
 
   const point = (event: PointerEvent): Point => {
@@ -467,7 +501,7 @@ export function mountSheet(
     const samples = coalesced.length ? coalesced : [event];
     const draft = currentDraft();
     const paper = resolvePaperTheme(draft.paperTheme, sheets.appInk);
-    const inkCtx = inkCanvas.getContext("2d");
+    const inkCtx = inkCanvas.getContext("2d", { willReadFrequently: true });
 
     for (const sample of samples) {
       if (sample.pointerType === "pen" && sample.pressure <= 0) {
@@ -482,7 +516,7 @@ export function mountSheet(
       }
       const next = point(sample);
       const prev = active.points.at(-1)!;
-      if (active.tool === "pen" && inkCtx) {
+      if (active.tool === "pen" && inkCtx && !(typeof inkCtx.isContextLost === "function" && inkCtx.isContextLost())) {
         paintSegment(
           inkCtx,
           prev,
@@ -493,7 +527,7 @@ export function mountSheet(
       }
       active.points.push(next);
     }
-    if (active?.tool === "eraser") render();
+    if (active?.tool === "eraser") scheduleCanvasRender();
   };
 
   const finish = (event: PointerEvent) => {
@@ -518,6 +552,8 @@ export function mountSheet(
     render();
   };
 
+  inkCanvas.addEventListener("contextrestored", render, { signal });
+  gridCanvas.addEventListener("contextrestored", render, { signal });
   inkCanvas.addEventListener("pointerdown", down, { signal });
   inkCanvas.addEventListener("pointermove", move, { signal });
   for (const name of ["pointerup", "pointercancel", "lostpointercapture"] as const) {
@@ -530,16 +566,30 @@ export function mountSheet(
   viewport.addEventListener("gesturestart", event => event.preventDefault(), { signal });
   viewport.addEventListener("wheel", event => event.preventDefault(), { signal, passive: false });
 
-  const unsubscribe = sheets.onChange(render);
-  const resize = new ResizeObserver(render);
+  const changed = (reason: PublishReason) => {
+    if (disposed) return;
+    if (reason === "tool") {
+      renderChrome();
+      return;
+    }
+    if (reason === "camera") {
+      renderChrome();
+      scheduleCanvasRender();
+      return;
+    }
+    render();
+  };
+  const unsubscribe = sheets.onChange(changed);
+  const resize = new ResizeObserver(scheduleCanvasRender);
   resize.observe(viewport);
   if (typeof window !== "undefined") {
-    window.addEventListener("resize", render, { signal });
+    window.addEventListener("resize", scheduleCanvasRender, { signal });
   }
 
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    cancelCanvasFrame();
     commitActive();
     pointerId = undefined;
     unsubscribe();

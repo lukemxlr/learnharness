@@ -71,6 +71,16 @@ function setupDom(viewport = { width: 820, height: 1180 }) {
 		MouseEvent: dom.window.MouseEvent,
 		KeyboardEvent: dom.window.KeyboardEvent,
 		CustomEvent: dom.window.CustomEvent,
+		ResizeObserver: class ResizeObserver {
+			observe() {}
+			unobserve() {}
+			disconnect() {}
+		},
+		MutationObserver: dom.window.MutationObserver ?? class MutationObserver {
+			observe() {}
+			disconnect() {}
+			takeRecords() { return []; }
+		},
 		IS_REACT_ACT_ENVIRONMENT: true,
 	};
 	const saved = new Map(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));

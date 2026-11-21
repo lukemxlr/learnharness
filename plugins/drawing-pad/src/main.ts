@@ -34,10 +34,13 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   const cleanups: (() => void)[] = [];
   const paletteController = new AbortController();
   const pageSessions = new Map<string, string>();
-
+  let hostKey: string | undefined;
   const sheets = new Sheets(
-    () => {
-      if (!disposed && !ctx.signal.aborted) {
+    (reason) => {
+      if (disposed || ctx.signal.aborted || reason === "camera" || reason === "tool") return;
+      const key = [...sheets.sessions.values()].map(state => `${state.id}:${sheets.pending(state) ? 1 : 0}`).join("|");
+      if (key !== hostKey) {
+        hostKey = key;
         ctx.refreshActions();
       }
     },
@@ -45,7 +48,6 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
       if (open?.session === state) close(open);
     },
   );
-
   function close(pad: OpenPad): void {
     if (pad.closed) return;
     pad.closed = true;

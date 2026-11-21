@@ -501,6 +501,7 @@ function createWindow(url, opts = {}) {
 		});
 	}
 
+	opts.beforeLoad?.(win);
 	void win.loadURL(url);
 	// Zoom truth reaches the renderer for EVERY load (reload, nav): the
 	// renderer's --lh-zoom must never go stale. The fallback catcher below
@@ -1009,7 +1010,10 @@ async function main() {
 		// are log lines — this can never block boot.
 		setupAutoUpdater();
 		ipcMain.on("lh:update-install", (event) => {
-			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) return;
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) {
+				log("auto-update: ignored install request from an untrusted sender");
+				return;
+			}
 			installUpdateNow();
 		});
 		ipcMain.handle("lh:update:get", (event) => {
@@ -1136,7 +1140,19 @@ async function main() {
 	});
 
 	if (!remoteModeActive) {
-		createWindow(staticAllowedUrl);
+		createWindow(staticAllowedUrl, {
+			beforeLoad: (firstWindow) => {
+				const fromFirstWindow = (event) => !firstWindow.isDestroyed() && event.sender === firstWindow.webContents &&
+					trustedSender(event, getAllowedOrigin(staticAllowedUrl), BrowserWindow);
+				let messages;
+				if (app.isPackaged && !devUrl) {
+					const { dismissalStore, startMessages } = require("./startup-messages.cjs");
+					messages = startMessages(firstWindow, dismissalStore(app.getPath("userData")));
+				}
+				ipcMain.handle("lh:startup-message:take", (event) => (messages && fromFirstWindow(event) ? messages.take() : null));
+				ipcMain.handle("lh:startup-message:dismiss", (event, id) => !!messages && fromFirstWindow(event) && messages.dismiss(id));
+			},
+		});
 		log(`window open: ${staticAllowedUrl}`);
 		// Startup + 24h checks stay main-owned and read the current preference.
 		// No renderer subscription is required; late loads retrieve the snapshot.

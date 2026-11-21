@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { PluginSessionViewInput, PluginSubmissionTarget } from "learnharness-plugin-api";
-import { draftStorageKey, questionKeyForInput, questionKeyForSubmissionTarget, Sheets } from "../src/state.ts";
+import { draftStorageKey, questionKeyForInput, questionKeyForSubmissionTarget, Sheets, type PublishReason } from "../src/state.ts";
 import type { Stroke } from "../src/strokes.ts";
 
 const stroke = (x = 10, color = "auto", width = 4): Stroke => ({
@@ -39,7 +39,6 @@ it("derives identical question keys from view inputs and submission targets", ()
   assert.equal(questionKeyForInput({ type: "text" } as unknown as PluginSessionViewInput), "composer");
   assert.equal(questionKeyForInput({ type: "unavailable", expanded: false, revealed: false } as unknown as PluginSessionViewInput), "composer");
 });
-
 it("supports undo, redo, and post-undo branch truncation", () => {
   const sheets = new Sheets(() => {}, () => {});
   const state = sheets.session("s1", "teaching");
@@ -159,4 +158,18 @@ it("practice pose observation resets drafts only on a genuinely new accepted pos
   assert.equal(resets, 1);
   assert.equal(state.drafts.size, 0);
   assert.equal(store.has(draftStorageKey("p1", "pose1")), false);
+}));
+
+it("publishes granular change reasons for sheet, ink, camera, and tool updates", () => withMockStorage(() => {
+  const reasons: PublishReason[] = [];
+  const sheets = new Sheets(reason => reasons.push(reason), () => {});
+  const state = sheets.session("s-reasons", "teaching");
+  sheets.openDraft(state, "q1", 1);
+  sheets.commitStroke(state, state.drafts.get("q1")!, stroke(10));
+  sheets.setPan(state, state.drafts.get("q1")!, { x: 10, y: 20 });
+  sheets.setTool(state, "eraser");
+  sheets.undo(state, state.drafts.get("q1")!);
+  sheets.redo(state, state.drafts.get("q1")!);
+  sheets.setPaperTheme(state, state.drafts.get("q1")!, "light");
+  assert.deepEqual(reasons, ["sheet", "ink", "camera", "tool", "ink", "ink", "sheet"]);
 }));

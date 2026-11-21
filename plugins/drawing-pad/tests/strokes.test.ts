@@ -4,11 +4,14 @@ import {
   clampStrokeWidth,
   DEFAULT_STROKE_WIDTH,
   inkSignature,
+  liveBounds,
   paintGrid,
   paintInk,
   paintStroke,
+  strokeBounds,
   strokeWidth,
   visibleStrokes,
+  visibleUnderEraser,
   type Point,
   type Stroke,
 } from "../src/strokes.ts";
@@ -136,4 +139,21 @@ it("paintGrid renders Karoraster lines on its separate canvas without touching i
   assert.equal(ops[0], "resetTransform");
   assert.equal(ops[1], "clear:100x100");
   assert.ok(ops.some(op => op === "stroke:rgba(15, 23, 42, 0.12)"));
+});
+
+it("memoizes visibleStrokes, preserves array identity on missed erasers, and measures bounds", () => {
+  const a = pen([point(0), point(100)]), b = pen([point(0, 60), point(100, 60)]);
+  const history = [a, b], visible = visibleStrokes(history);
+  assert.equal(visibleStrokes(history), visible);
+  const missed = [...history, erase([point(500, 500), point(520, 520)])];
+  assert.equal(visibleStrokes(missed), visible);
+  assert.equal(visibleUnderEraser(visible, erase([point(500, 500)])), visible);
+  assert.deepEqual(visibleUnderEraser(visible, erase([point(50, 0)])), [b]);
+
+  const stroke = pen([point(0, 0, 0), point(10, 20, 1)]);
+  assert.equal(strokeBounds(stroke), strokeBounds(stroke));
+  const live = pen([point(0, 0, 0)]), first = liveBounds(live);
+  live.points.push(point(10, 20, 1));
+  assert.notDeepEqual(liveBounds(live), first);
+  assert.notEqual(visibleStrokes(history), history);
 });

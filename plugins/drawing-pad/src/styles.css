@@ -451,3 +451,7 @@
     width: 60px;
   }
 }
+/* Offscreen reference containers must render content even if content-visibility:auto applies. */
+.drawing-pad-reference * {
+  content-visibility: visible !important;
+}

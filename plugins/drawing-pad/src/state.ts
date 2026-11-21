@@ -41,6 +41,8 @@ export interface SessionSheet {
   readTicket: number;
 }
 
+export type PublishReason = "sheet" | "ink" | "camera" | "tool";
+
 export interface Capture {
   session: SessionSheet;
   draft: Draft;
@@ -224,21 +226,21 @@ export class Sheets {
   imageScale = DEFAULT_IMAGE_SCALE;
   appInk = { darkInkColor: DEFAULT_DARK_INK_COLOR, lightInkColor: DEFAULT_LIGHT_INK_COLOR };
   private nextId = 0;
-  private readonly listeners = new Set<() => void>();
+  private readonly listeners = new Set<(reason: PublishReason) => void>();
 
   constructor(
-    private readonly changed: () => void,
+    private readonly changed: (reason: PublishReason) => void,
     private readonly newProblem: (session: SessionSheet) => void,
   ) {}
 
-  onChange(listener: () => void): () => void {
+  onChange(listener: (reason: PublishReason) => void): () => void {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   }
 
-  private publish(): void {
-    this.changed();
-    for (const listener of this.listeners) listener();
+  private publish(reason: PublishReason): void {
+    this.changed(reason);
+    for (const listener of this.listeners) listener(reason);
   }
 
   session(id: string, kind: SessionSheet["kind"]): SessionSheet {
@@ -286,7 +288,7 @@ export class Sheets {
       reference,
     };
     state.drafts.set(questionKey, draft);
-    this.publish();
+    this.publish("sheet");
     return draft;
   }
 
@@ -297,7 +299,7 @@ export class Sheets {
   setAppInkColors(darkInkColor: string, lightInkColor: string): void {
     if (this.appInk.darkInkColor === darkInkColor && this.appInk.lightInkColor === lightInkColor) return;
     this.appInk = { darkInkColor, lightInkColor };
-    this.publish();
+    this.publish("sheet");
   }
 
   commitStroke(state: SessionSheet, draft: Draft, stroke: Stroke): void {
@@ -312,7 +314,7 @@ export class Sheets {
     };
     state.drafts.set(draft.questionKey, next);
     savePersistedDraft(next);
-    this.publish();
+    this.publish("ink");
   }
 
   undo(state: SessionSheet, draft: Draft): void {
@@ -329,7 +331,7 @@ export class Sheets {
     };
     state.drafts.set(draft.questionKey, next);
     savePersistedDraft(next);
-    this.publish();
+    this.publish("ink");
   }
 
   redo(state: SessionSheet, draft: Draft): void {
@@ -346,7 +348,7 @@ export class Sheets {
     };
     state.drafts.set(draft.questionKey, next);
     savePersistedDraft(next);
-    this.publish();
+    this.publish("ink");
   }
 
   clear(state: SessionSheet, draft: Draft): void {
@@ -363,7 +365,7 @@ export class Sheets {
     state.drafts.set(draft.questionKey, next);
     state.stagedKeys.delete(draft.questionKey);
     removePersistedDraft(state.id, draft.questionKey);
-    this.publish();
+    this.publish("ink");
   }
 
   setPaperTheme(state: SessionSheet, draft: Draft, paperTheme: PaperTheme): void {
@@ -372,7 +374,7 @@ export class Sheets {
     const next: Draft = { ...current, revision: current.revision + 1, paperTheme };
     state.drafts.set(draft.questionKey, next);
     savePersistedDraft(next);
-    this.publish();
+    this.publish("sheet");
   }
 
   setGrid(state: SessionSheet, draft: Draft, grid: boolean): void {
@@ -381,7 +383,7 @@ export class Sheets {
     const next: Draft = { ...current, revision: current.revision + 1, grid };
     state.drafts.set(draft.questionKey, next);
     savePersistedDraft(next);
-    this.publish();
+    this.publish("sheet");
   }
 
   setPan(state: SessionSheet, draft: Draft, pan: { x: number; y: number }): void {
@@ -390,26 +392,26 @@ export class Sheets {
     const next: Draft = { ...current, pan };
     state.drafts.set(draft.questionKey, next);
     savePersistedDraft(next);
-    this.publish();
+    this.publish("camera");
   }
 
   setTool(state: SessionSheet, tool: Tool): void {
     if (state.tool === tool) return;
     state.tool = tool;
-    this.publish();
+    this.publish("tool");
   }
 
   setPenColor(state: SessionSheet, color: string): void {
     state.penColor = color;
     if (state.tool !== "pen") state.tool = "pen";
-    this.publish();
+    this.publish("tool");
   }
 
   setStrokeWidth(state: SessionSheet, width: number): void {
     const clamped = clampStrokeWidth(width);
     if (state.strokeWidth === clamped) return;
     state.strokeWidth = clamped;
-    this.publish();
+    this.publish("tool");
   }
 
   markStaged(state: SessionSheet, questionKey: string): void {
@@ -451,7 +453,7 @@ export class Sheets {
       state.stagedKeys.delete(questionKey);
     }
     removePersistedDraft(sessionId, questionKey);
-    this.publish();
+    this.publish("sheet");
   }
 
   /** Only accepted pose identities reset practice sheets. */
@@ -468,7 +470,7 @@ export class Sheets {
     state.stagedKeys.clear();
     state.tool = "pen";
     this.newProblem(state);
-    this.publish();
+    this.publish("sheet");
     return true;
   }
 

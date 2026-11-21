@@ -52,9 +52,65 @@ function segmentDistanceSquared(a: Point, b: Point, c: Point, d: Point): number 
   );
 }
 
-function touchesStroke(stroke: Stroke, eraser: Stroke): boolean {
+/* Invariant: a Stroke object and a history array are immutable once committed.
+ * The only mutable stroke is the sheet's live `active` stroke, which must
+ * never reach the caches below (bounds and resolved histories). */
+export interface StrokeBounds { left: number; top: number; right: number; bottom: number }
+
+const bounds = new WeakMap<Stroke, StrokeBounds>();
+
+function measure(stroke: Stroke): StrokeBounds {
+  const base = stroke.width ?? DEFAULT_STROKE_WIDTH;
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+  for (let i = 0; i < stroke.points.length; i++) {
+    const a = stroke.points[Math.max(0, i - 1)]!, b = stroke.points[i]!;
+    const radius = strokeWidth(a, b, base) / 2;
+    left = Math.min(left, a.x - radius, b.x - radius);
+    top = Math.min(top, a.y - radius, b.y - radius);
+    right = Math.max(right, a.x + radius, b.x + radius);
+    bottom = Math.max(bottom, a.y + radius, b.y + radius);
+  }
+  return { left, top, right, bottom };
+}
+
+/** Committed strokes only. Includes each segment's half width. */
+export function strokeBounds(stroke: Stroke): StrokeBounds {
+  let cached = bounds.get(stroke);
+  if (!cached) {
+    cached = measure(stroke);
+    bounds.set(stroke, cached);
+  }
+  return cached;
+}
+
+/** Same as strokeBounds, never cached: for a still-growing (active) stroke. */
+export function liveBounds(stroke: Stroke): StrokeBounds {
+  return measure(stroke);
+}
+
+function eraserBounds(eraser: Stroke): StrokeBounds {
+  let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const point of eraser.points) {
+    left = Math.min(left, point.x);
+    top = Math.min(top, point.y);
+    right = Math.max(right, point.x);
+    bottom = Math.max(bottom, point.y);
+  }
+  return { left, top, right, bottom };
+}
+
+function touchesStroke(stroke: Stroke, eraser: Stroke, pen: StrokeBounds, erase: StrokeBounds): boolean {
   const base = stroke.width ?? DEFAULT_STROKE_WIDTH;
   const eraserRadius = Math.max(12, (eraser.width ?? 12) * 1.5);
+  const contact = eraserRadius + 1e-6;
+  if (
+    pen.left - contact > erase.right ||
+    pen.right + contact < erase.left ||
+    pen.top - contact > erase.bottom ||
+    pen.bottom + contact < erase.top
+  ) {
+    return false;
+  }
   for (let i = 0; i < stroke.points.length; i++) {
     const a = stroke.points[Math.max(0, i - 1)]!, b = stroke.points[i]!;
     const radius = eraserRadius + strokeWidth(a, b, base) / 2;
@@ -66,14 +122,54 @@ function touchesStroke(stroke: Stroke, eraser: Stroke): boolean {
   return false;
 }
 
-/** Keep eraser gestures in history so undo restores complete removed strokes. */
-export function visibleStrokes(history: readonly Stroke[]): Stroke[] {
-  let visible: Stroke[] = [];
-  for (const stroke of history) {
-    if (stroke.tool === "pen" && stroke.points.length) visible.push(stroke);
-    else if (stroke.tool === "eraser") visible = visible.filter(pen => !touchesStroke(pen, stroke));
+/** Pens in `visible` that `eraser` does not touch; the same array object when
+ * it touches none (callers can use identity to skip repaints). */
+function erase(visible: readonly Stroke[], eraser: Stroke): readonly Stroke[] {
+  if (!visible.length) return visible;
+  const area = eraserBounds(eraser);
+  const kept = visible.filter(pen => !touchesStroke(pen, eraser, strokeBounds(pen), area));
+  return kept.length === visible.length ? visible : kept;
+}
+
+const resolved = new WeakMap<readonly Stroke[], readonly Stroke[]>();
+let last: { history: readonly Stroke[]; visible: readonly Stroke[] } | undefined;
+
+function extendsLast(history: readonly Stroke[]): boolean {
+  if (!last || history.length !== last.history.length + 1) return false;
+  for (let i = 0; i < last.history.length; i++) {
+    if (history[i] !== last.history[i]) return false;
   }
+  return true;
+}
+
+/** Keep eraser gestures in history so undo restores complete removed strokes.
+ * Memoised per history array; one appended stroke is resolved incrementally.
+ * The result is shared: never mutate it. */
+export function visibleStrokes(history: readonly Stroke[]): readonly Stroke[] {
+  let visible = resolved.get(history);
+  if (!visible) {
+    if (extendsLast(history)) {
+      const stroke = history.at(-1)!;
+      visible = stroke.tool === "pen"
+        ? (stroke.points.length ? [...last!.visible, stroke] : last!.visible)
+        : erase(last!.visible, stroke);
+    } else {
+      let replay: Stroke[] = [];
+      for (const stroke of history) {
+        if (stroke.tool === "pen" && stroke.points.length) replay.push(stroke);
+        else if (stroke.tool === "eraser") replay = erase(replay, stroke) as Stroke[];
+      }
+      visible = replay;
+    }
+    resolved.set(history, visible);
+  }
+  last = { history, visible };
   return visible;
+}
+
+/** Visible committed strokes minus those touched by a still-growing eraser stroke. Never cached. */
+export function visibleUnderEraser(visible: readonly Stroke[], eraser: Stroke): readonly Stroke[] {
+  return erase(visible, eraser);
 }
 
 export function inkSignature(history: readonly Stroke[], paperKey = "app", defaultColor = "auto"): string {

@@ -15,7 +15,6 @@ import type {
   PluginSurfaceProps,
 } from "learnharness-plugin-api";
 import { activate } from "../src/main.ts";
-
 function fixture() {
   const signal = new AbortController();
   const notifications = new Set<(event: PluginNotification) => void>();

@@ -66,6 +66,14 @@ export interface ModelCatalogResponse {
 	catalogErrors?: Record<string, string>;
 }
 
+export type ModelCatalogRefreshOutcome = "updated" | "unchanged" | "no-providers";
+
+/** POST /api/models response. */
+export interface ModelCatalogRefreshResponse {
+	outcome: ModelCatalogRefreshOutcome;
+	catalog: ModelCatalogResponse;
+}
+
 /** One row of the providers surface. */
 export interface CatalogProvider {
 	id: string;

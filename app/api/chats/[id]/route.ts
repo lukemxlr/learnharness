@@ -3,8 +3,15 @@ import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
+	if (new URL(req.url).searchParams.get("view") === "stats") {
+		// Stats refreshes don't adopt history or need plugin availability.
+		const chat = getChat(id);
+		return chat
+			? Response.json({ turns: chat.turns, pricing: sessionCost(chat) }, { headers: { "Cache-Control": "no-store" } })
+			: Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+	}
 	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
 	let chat = getChat(id);
 	if (!chat) return Response.json({ error: "Not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
