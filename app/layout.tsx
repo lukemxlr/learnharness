@@ -26,6 +26,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
 	width: "device-width",
 	initialScale: 1,
+	// Prevent mobile WebKit / iPadOS Safari shrink-to-fit scale drift across rapid
+	// orientation and Split-View resizes while keeping pinch-zoom unrestricted.
+	minimumScale: 1,
 	viewportFit: "cover",
 };
 

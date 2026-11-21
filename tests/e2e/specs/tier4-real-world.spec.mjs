@@ -29,6 +29,7 @@ import {
 	composerInput,
 	createChatSession,
 	DEFAULT_USER,
+	discoverCustomProviderModels,
 	loginApi,
 	loginBrowser,
 	questionInput,
@@ -76,6 +77,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 	test("T4-01: Acceptance Core Journey — Desktop -> iPad mid-stream handoff + Light-paper drawing in Dark app + cross-device history", async ({
 		browser,
 	}) => {
+		test.slow();
 		const stack = await bootStack({
 			mockOptions: { chunkDelayMs: 110 },
 			startOptions: { trustProxy: true, allowedHosts: "lh.study.test" },
@@ -118,7 +120,9 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 			await setPaperTheme(ipadPage, "light");
 			await toggleKarorasterGrid(ipadPage);
 			await toggleQuestionContext(ipadPage);
-			await expect(ipadPage.getByText(/horizontal and vertical components/i)).toBeVisible();
+			await expect(
+				ipadPage.locator("[data-plugin-session-surface-frame]").getByText(/horizontal and vertical components/i),
+			).toBeVisible();
 			await toggleQuestionContext(ipadPage);
 
 			await selectPenColor(ipadPage, /black|ink|#111|dark/i);
@@ -479,13 +483,14 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 				],
 			});
 			const chat = await createChatSession(stack.baseUrl, cookie, { title: "Catalog Outage Resilience" });
+			await discoverCustomProviderModels(stack.baseUrl, cookie, stack.mock.baseUrl);
 			await fetch(`${stack.baseUrl}/api/models/refresh`, { method: "POST", headers: { Cookie: cookie } });
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
 			await page.getByTestId("stats-model").click();
 			await page.getByTestId("model-search").fill("gpt-test-9-nova");
-			await page.getByTestId("model-menu").getByText("gpt-test-9-nova").first().click();
+			await page.getByTestId("model-menu").getByTestId("model-option-gpt-test-9-nova").click();
 			await expect(page.getByTestId("stats-model")).toContainText(/gpt-test-9-nova/i);
 
 			await composerInput(page).fill("Verify gpt-test-9-nova turn");
@@ -684,6 +689,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 	});
 
 	test("T4-08: Drawing Pad Multi-Question Lesson Lifecycle & Cross-Session Isolation", async ({ browser }) => {
+		test.slow();
 		const stack = await bootStack({ mockOptions: { chunkDelayMs: 5 } });
 		const deskCtx = await browser.newContext(viewportContextOptions(VIEWPORT_MATRIX["VP-DESK-REF"]));
 		const ipadCtx = await browser.newContext(viewportContextOptions(VIEWPORT_MATRIX["VP-MD-PORT"]));

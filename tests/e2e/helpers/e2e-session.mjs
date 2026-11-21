@@ -118,6 +118,26 @@ export async function createChatSession(baseUrl, cookie, body = {}) {
 	return res.json();
 }
 
+export async function discoverCustomProviderModels(baseUrl, cookie, mockBaseUrl) {
+	const cpGet = await fetch(`${baseUrl}/api/custom-provider`, {
+		headers: { Cookie: cookie },
+	});
+	expect(cpGet.status).toBe(200);
+	const cpPost = await fetch(`${baseUrl}/api/custom-provider`, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Cookie: cookie,
+			Origin: baseUrl,
+			"Sec-Fetch-Site": "same-origin",
+			"If-Match": cpGet.headers.get("etag") || "",
+		},
+		body: JSON.stringify({ baseUrl: mockBaseUrl, authMode: "keyless" }),
+	});
+	expect(cpPost.status).toBe(200);
+	return cpPost.json();
+}
+
 export async function assertNoHorizontalOverflow(page) {
 	const dims = await page.evaluate(() => ({
 		scrollWidth: document.documentElement.scrollWidth,

@@ -324,6 +324,11 @@ test.describe("Tier 1 — F2: Isolated Test LLM Provider & Synthetic Fixtures", 
 			expect(graphData.propositions.some((n) => n.name === "Projectile Velocity Decomposition")).toBe(true);
 
 			await loginBrowser(page, stack.baseUrl);
+			const physicsFolder = page.getByTestId("sidebar-folder-folder_synth_physics");
+			await expect(physicsFolder).toBeVisible();
+			if ((await physicsFolder.getAttribute("aria-expanded")) !== "true") {
+				await physicsFolder.click();
+			}
 			await expect(page.getByText("Kinematics & Projectile Vectors")).toBeVisible();
 			const bodyText = await page.locator("body").innerText();
 			expect(bodyText).not.toMatch(/AppData\\Roaming/i);

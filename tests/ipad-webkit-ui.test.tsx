@@ -418,4 +418,67 @@ describe("M5 iPadOS / WebKit UI & Responsive Primitives", () => {
 		);
 		assert.ok(composerHtml.includes("size-10") && composerHtml.includes("min-h-11") && composerHtml.includes("rounded-[10px]"));
 	});
+
+	it("renders session-search without native HTML placeholder (WebKit mobile scale guard) and defers sidebar mount transitions", async () => {
+		setupDom({ width: 1440, height: 900 });
+		globalThis.fetch = (async (input: RequestInfo | URL) => {
+			const url = String(input);
+			if (url.startsWith("/api/chats")) return Response.json({ chats: [] });
+			if (url.startsWith("/api/plugins")) return Response.json({ plugins: [], directory: "/tmp" });
+			if (url.startsWith("/api/settings")) return Response.json({ settings: { version: 1 } });
+			return Response.json({});
+		}) as typeof fetch;
+		let rafCb: FrameRequestCallback | null = null;
+		const origRaf = globalThis.requestAnimationFrame;
+		const origCaf = globalThis.cancelAnimationFrame;
+		globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+			rafCb = cb;
+			return 42;
+		}) as typeof requestAnimationFrame;
+		globalThis.cancelAnimationFrame = (() => {}) as typeof cancelAnimationFrame;
+		try {
+			const router = {
+				bfcacheId: "test",
+				back() {},
+				forward() {},
+				refresh() {},
+				hmrRefresh() {},
+				push() {},
+				replace() {},
+				async prefetch() {},
+			};
+			const connect = (): NotifySource => ({ close() {}, onOpen() {}, onEvent() {} });
+			await act(async () => {
+				root!.render(
+					<AppRouterContext.Provider value={router}>
+						<PathnameContext.Provider value="/">
+							<ServerEventsProvider connect={connect}>
+								<PluginsProvider>
+									<SidebarProvider>
+										<AppShell>
+											<div>content</div>
+										</AppShell>
+									</SidebarProvider>
+								</PluginsProvider>
+							</ServerEventsProvider>
+						</PathnameContext.Provider>
+					</AppRouterContext.Provider>,
+				);
+			});
+			const searchInput = document.querySelector<HTMLInputElement>('[data-testid="session-search"]');
+			assert.ok(searchInput, "session-search input rendered");
+			assert.equal(searchInput.getAttribute("placeholder"), null, "must avoid native HTML placeholder on persistent sidebar search");
+			assert.equal(searchInput.getAttribute("aria-placeholder"), "Search…");
+			const shell = document.querySelector(".overflow-x-clip");
+			assert.ok(shell && !shell.className.includes("transition-[width"), "no slide-in transition before first paint frame");
+			assert.ok(rafCb, "deferred mount transition scheduled via requestAnimationFrame");
+			await act(async () => {
+				rafCb!(16);
+			});
+			assert.ok(shell.className.includes("transition-[width"), "sidebar motion transition enabled after first paint frame");
+		} finally {
+			globalThis.requestAnimationFrame = origRaf;
+			globalThis.cancelAnimationFrame = origCaf;
+		}
+	});
 });

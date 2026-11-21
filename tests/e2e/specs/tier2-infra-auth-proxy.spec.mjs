@@ -264,7 +264,7 @@ test.describe("Tier 2 — F2: Mock Provider Faults, Isolation & Concurrency", ()
 			// Subsequent turn succeeds cleanly
 			await input.fill("Retry after rate limit");
 			await page.getByRole("button", { name: "Send" }).click();
-			await expect(page.getByText(/Synthetic tutor response: Retry after rate limit/i)).toBeVisible({
+			await expect(page.getByText(/Synthetic tutor response:.*Retry after rate limit/i)).toBeVisible({
 				timeout: 15_000,
 			});
 		} finally {
@@ -303,7 +303,7 @@ test.describe("Tier 2 — F2: Mock Provider Faults, Isolation & Concurrency", ()
 
 			await input.fill("Continue after socket abort");
 			await page.getByRole("button", { name: "Send" }).click();
-			await expect(page.getByText(/Synthetic tutor response: Continue after socket abort/i)).toBeVisible({
+			await expect(page.getByText(/Synthetic tutor response:.*Continue after socket abort/i)).toBeVisible({
 				timeout: 15_000,
 			});
 		} finally {

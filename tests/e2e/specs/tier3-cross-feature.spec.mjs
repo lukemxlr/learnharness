@@ -22,6 +22,7 @@ import {
 	bootStack,
 	composerInput,
 	createChatSession,
+	discoverCustomProviderModels,
 	loginApi,
 	loginBrowser,
 	questionInput,
@@ -199,6 +200,8 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			const subStatus = await subStatusRes.json();
 			expect(subStatus.chatgpt?.available).toBe(true);
 
+			await discoverCustomProviderModels(stack.baseUrl, cookie, stack.mock.baseUrl);
+
 			const refreshRes = await fetch(`${stack.baseUrl}/api/models/refresh`, {
 				method: "POST",
 				headers: { Cookie: cookie },
@@ -214,7 +217,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			await page.getByTestId("stats-model").click();
 			await expect(page.getByTestId("model-menu")).toBeVisible();
 			await page.getByTestId("model-search").fill("gpt-test-7-pro");
-			await page.getByTestId("model-menu").getByText("gpt-test-7-pro").first().click();
+			await page.getByTestId("model-menu").getByTestId("model-option-gpt-test-7-pro").click();
 
 			await stack.mock.clearRequests();
 			await composerInput(page).fill("Explain momentum conservation");
@@ -236,6 +239,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 		const page = await context.newPage();
 		try {
 			const { cookie } = await loginApi(stack.baseUrl);
+			await discoverCustomProviderModels(stack.baseUrl, cookie, stack.mock.baseUrl);
 			const modelsBefore = await (
 				await fetch(`${stack.baseUrl}/api/models`, { headers: { Cookie: cookie } })
 			).json();
@@ -348,6 +352,11 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 				username: "migrateduser",
 				password: "MigratedPassword123!",
 			});
+			const physicsFolder = page.getByTestId("sidebar-folder-folder_synth_physics");
+			await expect(physicsFolder).toBeVisible();
+			if ((await physicsFolder.getAttribute("aria-expanded")) !== "true") {
+				await physicsFolder.click();
+			}
 			await expect(page.getByText("Kinematics & Projectile Vectors")).toBeVisible();
 		} finally {
 			await context.close();
@@ -615,6 +624,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 	});
 
 	test("T3-14 (F10+F7): Drawing Pad Draft + Mid-Stream/Reload Device Sync", async ({ browser }) => {
+		test.slow();
 		const stack = await bootStack({ mockOptions: { chunkDelayMs: 5 } });
 		const deskCtx = await browser.newContext(viewportContextOptions(VIEWPORT_MATRIX["VP-DESK-REF"]));
 		const ipadCtx = await browser.newContext(viewportContextOptions(VIEWPORT_MATRIX["VP-MD-PORT"]));
@@ -701,6 +711,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 		const page = await context.newPage();
 		try {
 			const { cookie } = await loginApi(stack.baseUrl);
+			await discoverCustomProviderModels(stack.baseUrl, cookie, stack.mock.baseUrl);
 			const chat = await createChatSession(stack.baseUrl, cookie, { title: "Split-View Model Picker" });
 
 			await loginBrowser(page, stack.baseUrl);
@@ -712,7 +723,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			await assertPopoversInViewport(page);
 
 			await page.getByTestId("model-search").fill("gpt-test-7-pro");
-			await menu.getByText("gpt-test-7-pro").first().tap();
+			await menu.getByTestId("model-option-gpt-test-7-pro").tap();
 			await expect(page.getByTestId("stats-model")).toContainText(/gpt-test-7-pro/i);
 			await assertNoHorizontalOverflow(page);
 

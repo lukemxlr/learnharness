@@ -240,85 +240,100 @@ export function analyzePngPixels(pngBuffer) {
 		const srcRow = y * (rowBytes + 1);
 		const filter = inflated[srcRow];
 		const dstRow = y * rowBytes;
-		for (let x = 0; x < rowBytes; x++) {
-			const rawByte = inflated[srcRow + 1 + x];
-			const a = x >= bpp ? unfiltered[dstRow + x - bpp] : 0;
-			const b = y > 0 ? unfiltered[dstRow - rowBytes + x] : 0;
-			const c = y > 0 && x >= bpp ? unfiltered[dstRow - rowBytes + x - bpp] : 0;
-			let val;
-			switch (filter) {
-				case 0:
-					val = rawByte;
-					break;
-				case 1:
-					val = (rawByte + a) & 0xff;
-					break;
-				case 2:
-					val = (rawByte + b) & 0xff;
-					break;
-				case 3:
-					val = (rawByte + ((a + b) >> 1)) & 0xff;
-					break;
-				case 4:
-					val = (rawByte + paethPredictor(a, b, c)) & 0xff;
-					break;
-				default:
-					throw new Error(`Unknown PNG scanline filter type: ${filter}`);
+		const srcData = srcRow + 1;
+		if (filter === 0) {
+			inflated.copy(unfiltered, dstRow, srcData, srcData + rowBytes);
+		} else if (filter === 1) {
+			for (let x = 0; x < bpp; x++) {
+				unfiltered[dstRow + x] = inflated[srcData + x];
 			}
-			unfiltered[dstRow + x] = val;
+			for (let x = bpp; x < rowBytes; x++) {
+				unfiltered[dstRow + x] = (inflated[srcData + x] + unfiltered[dstRow + x - bpp]) & 0xff;
+			}
+		} else if (filter === 2) {
+			if (y === 0) {
+				inflated.copy(unfiltered, dstRow, srcData, srcData + rowBytes);
+			} else {
+				const prevRow = dstRow - rowBytes;
+				for (let x = 0; x < rowBytes; x++) {
+					unfiltered[dstRow + x] = (inflated[srcData + x] + unfiltered[prevRow + x]) & 0xff;
+				}
+			}
+		} else if (filter === 3) {
+			const prevRow = dstRow - rowBytes;
+			for (let x = 0; x < rowBytes; x++) {
+				const a = x >= bpp ? unfiltered[dstRow + x - bpp] : 0;
+				const b = y > 0 ? unfiltered[prevRow + x] : 0;
+				unfiltered[dstRow + x] = (inflated[srcData + x] + ((a + b) >> 1)) & 0xff;
+			}
+		} else if (filter === 4) {
+			const prevRow = dstRow - rowBytes;
+			for (let x = 0; x < rowBytes; x++) {
+				const a = x >= bpp ? unfiltered[dstRow + x - bpp] : 0;
+				const b = y > 0 ? unfiltered[prevRow + x] : 0;
+				const c = y > 0 && x >= bpp ? unfiltered[prevRow + x - bpp] : 0;
+				unfiltered[dstRow + x] = (inflated[srcData + x] + paethPredictor(a, b, c)) & 0xff;
+			}
+		} else {
+			throw new Error(`Unknown PNG scanline filter type: ${filter}`);
 		}
 	}
 
 	const totalPixels = width * height;
-	const rgbaPixels = new Uint8Array(totalPixels * 4);
+	const rgbaPixels = colorType === 6 ? unfiltered : new Uint8Array(totalPixels * 4);
 	const colorCounts = new Map();
 	let transparentPixelCount = 0;
 
-	for (let i = 0; i < totalPixels; i++) {
-		const src = i * bpp;
-		let r = 0;
-		let g = 0;
-		let b = 0;
-		let a = 255;
-		if (colorType === 6) {
-			r = unfiltered[src];
-			g = unfiltered[src + 1];
-			b = unfiltered[src + 2];
-			a = unfiltered[src + 3];
-		} else if (colorType === 2) {
-			r = unfiltered[src];
-			g = unfiltered[src + 1];
-			b = unfiltered[src + 2];
-		} else if (colorType === 0) {
-			r = g = b = unfiltered[src];
-		} else if (colorType === 4) {
-			r = g = b = unfiltered[src];
-			a = unfiltered[src + 1];
-		} else if (colorType === 3) {
-			const idx = unfiltered[src] * 3;
-			if (!palette || idx + 2 >= palette.length) {
-				throw new Error("Indexed PNG missing palette entry");
+	if (colorType === 6) {
+		for (let off = 0, end = totalPixels * 4; off < end; off += 4) {
+			const r = unfiltered[off];
+			const g = unfiltered[off + 1];
+			const b = unfiltered[off + 2];
+			const a = unfiltered[off + 3];
+			if (a < 20) transparentPixelCount++;
+			const key = (((r << 24) | (g << 16) | (b << 8) | a) >>> 0);
+			colorCounts.set(key, (colorCounts.get(key) ?? 0) + 1);
+		}
+	} else {
+		for (let i = 0; i < totalPixels; i++) {
+			const src = i * bpp;
+			let r = 0;
+			let g = 0;
+			let b = 0;
+			let a = 255;
+			if (colorType === 2) {
+				r = unfiltered[src];
+				g = unfiltered[src + 1];
+				b = unfiltered[src + 2];
+			} else if (colorType === 0) {
+				r = g = b = unfiltered[src];
+			} else if (colorType === 4) {
+				r = g = b = unfiltered[src];
+				a = unfiltered[src + 1];
+			} else if (colorType === 3) {
+				const idx = unfiltered[src] * 3;
+				if (!palette || idx + 2 >= palette.length) {
+					throw new Error("Indexed PNG missing palette entry");
+				}
+				r = palette[idx];
+				g = palette[idx + 1];
+				b = palette[idx + 2];
 			}
-			r = palette[idx];
-			g = palette[idx + 1];
-			b = palette[idx + 2];
-		}
 
-		const dst = i * 4;
-		rgbaPixels[dst] = r;
-		rgbaPixels[dst + 1] = g;
-		rgbaPixels[dst + 2] = b;
-		rgbaPixels[dst + 3] = a;
+			const dst = i * 4;
+			rgbaPixels[dst] = r;
+			rgbaPixels[dst + 1] = g;
+			rgbaPixels[dst + 2] = b;
+			rgbaPixels[dst + 3] = a;
 
-		if (a < 20) {
-			transparentPixelCount++;
+			if (a < 20) transparentPixelCount++;
+			const key = (((r << 24) | (g << 16) | (b << 8) | a) >>> 0);
+			colorCounts.set(key, (colorCounts.get(key) ?? 0) + 1);
 		}
-		const key = `${r},${g},${b},${a}`;
-		colorCounts.set(key, (colorCounts.get(key) ?? 0) + 1);
 	}
 
 	// Determine background from most frequent color (quantized exact match)
-	let bgKey = "255,255,255,255";
+	let bgKey = 0xffffffff;
 	let bestCount = -1;
 	for (const [key, count] of colorCounts.entries()) {
 		if (count > bestCount) {
@@ -326,7 +341,10 @@ export function analyzePngPixels(pngBuffer) {
 			bgKey = key;
 		}
 	}
-	const [bgR, bgG, bgB, bgA] = bgKey.split(",").map(Number);
+	const bgR = (bgKey >>> 24) & 0xff;
+	const bgG = (bgKey >>> 16) & 0xff;
+	const bgB = (bgKey >>> 8) & 0xff;
+	const bgA = bgKey & 0xff;
 	const backgroundLuminance = srgbLuminance255(bgR, bgG, bgB);
 	const bgRelLum = srgbToRelativeLuminance(bgR, bgG, bgB);
 
@@ -336,19 +354,25 @@ export function analyzePngPixels(pngBuffer) {
 	let strokeContrastSum = 0;
 	const strokeContrastRatios = [];
 
-	for (let i = 0; i < totalPixels; i++) {
-		const dst = i * 4;
+	for (let dst = 0, end = totalPixels * 4; dst < end; dst += 4) {
+		const a = rgbaPixels[dst + 3];
+		if (a < 20) continue;
 		const rawR = rgbaPixels[dst];
 		const rawG = rgbaPixels[dst + 1];
 		const rawB = rgbaPixels[dst + 2];
-		const a = rgbaPixels[dst + 3];
-		if (a < 20) continue;
-		const alpha = a / 255;
-		const r = a === 255 ? rawR : Math.round(rawR * alpha + bgR * (1 - alpha));
-		const g = a === 255 ? rawG : Math.round(rawG * alpha + bgG * (1 - alpha));
-		const b = a === 255 ? rawB : Math.round(rawB * alpha + bgB * (1 - alpha));
-		const dist = Math.hypot(r - bgR, g - bgG, b - bgB);
-		if (dist > 30) {
+		let r = rawR;
+		let g = rawG;
+		let b = rawB;
+		if (a !== 255) {
+			const alpha = a / 255;
+			r = Math.round(rawR * alpha + bgR * (1 - alpha));
+			g = Math.round(rawG * alpha + bgG * (1 - alpha));
+			b = Math.round(rawB * alpha + bgB * (1 - alpha));
+		}
+		const dr = r - bgR;
+		const dg = g - bgG;
+		const db = b - bgB;
+		if (dr * dr + dg * dg + db * db > 900) {
 			strokePixelCount++;
 			strokeLumSum += srgbLuminance255(r, g, b);
 			const relLum = srgbToRelativeLuminance(r, g, b);

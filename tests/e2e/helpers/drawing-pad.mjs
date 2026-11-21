@@ -171,6 +171,7 @@ export async function openDrawingPad(page) {
 export async function closeDrawingPad(page) {
 	const scope = await drawingPadSurfaceOrPage(page);
 	await scope.getByRole("button", { name: /Close|×/i }).first().click();
+	await expect(drawingCanvas(page)).toBeHidden({ timeout: 15_000 });
 }
 
 export async function toggleKarorasterGrid(page) {
@@ -251,4 +252,5 @@ export async function selectStrokeWidth(page, width) {
 export async function addDrawingToAnswer(page) {
 	const scope = await drawingPadSurfaceOrPage(page);
 	await scope.getByRole("button", { name: /Add to answer/i }).click();
+	await expect(drawingCanvas(page)).toBeHidden({ timeout: 15_000 });
 }

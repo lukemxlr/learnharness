@@ -189,8 +189,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			setIsDrawer(drawer);
 			if (drawer) setDrawerOpen(false);
 		}
-		setMounted(true);
-		return () => off?.();
+		const frame = typeof requestAnimationFrame === "function"
+			? requestAnimationFrame(() => setMounted(true))
+			: 0;
+		if (!frame) setMounted(true);
+		return () => {
+			if (frame && typeof cancelAnimationFrame === "function") cancelAnimationFrame(frame);
+			off?.();
+		};
 	}, []);
 
 	// Responsive viewport tracking: Electron uses SIDEBAR_AUTOCLOSE + expandWindow,
@@ -212,7 +218,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		};
 		onResize();
 		window.addEventListener("resize", onResize);
-		return () => window.removeEventListener("resize", onResize);
+		const vv = window.visualViewport;
+		vv?.addEventListener?.("resize", onResize);
+		const mql = typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 1023.98px)") : null;
+		mql?.addEventListener?.("change", onResize);
+		return () => {
+			window.removeEventListener("resize", onResize);
+			vv?.removeEventListener?.("resize", onResize);
+			mql?.removeEventListener?.("change", onResize);
+		};
 	}, []);
 
 	const effectiveOpen = IS_ELECTRON && typeof window !== "undefined" && typeof window.lh?.expandWindow === "function"
@@ -1061,7 +1075,7 @@ function SessionsSidebar() {
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
 					<Hint label="Search sessions" action="sessions-search" side="bottom">
-					<span className="relative flex-1">
+					<span className="relative min-w-0 flex-1">
 						<Input
 							ref={searchRef}
 							data-testid="session-search"
@@ -1113,10 +1127,22 @@ function SessionsSidebar() {
 									e.currentTarget.blur();
 								}
 							}}
-							placeholder="Search…"
+							// Avoid native HTML placeholder on the persistent sidebar search input:
+							// in mobile WebKit (`isMobile`), its UA shadow placeholder triggers a
+							// viewport shrink-to-fit scale explosion (e.g. 3312x2070, scale 0.66)
+							// across orientation and Split-View resizes.
+							aria-placeholder="Search…"
 							aria-label="Search sessions"
-							className="h-6 max-lg:h-10 [@media(pointer:coarse)]:h-10 rounded-sm border-border bg-background pl-6 text-xs max-lg:text-[16px] placeholder:text-muted-foreground/60"
+							className="h-6 max-lg:h-10 [@media(pointer:coarse)]:h-10 rounded-sm border-border bg-background pl-6 text-xs max-lg:text-[16px]"
 						/>
+						{query === "" && (
+							<span
+								aria-hidden="true"
+								className="pointer-events-none absolute inset-y-0 left-6 right-2 flex items-center truncate text-xs max-lg:text-[16px] text-muted-foreground/60"
+							>
+								Search…
+							</span>
+						)}
 						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
 					</span>
 					</Hint>

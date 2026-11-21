@@ -506,6 +506,11 @@ test.describe("Tier 1 — F6: Safe Profile Export/Import & Windows Attachment Mi
 			expect(fs.existsSync(path.join(stack.ctrl.dataDir, "prompts", "teacher", "20-teaching.md"))).toBe(true);
 
 			await loginBrowser(page, stack.baseUrl);
+			const physicsFolder = page.getByTestId("sidebar-folder-folder_synth_physics");
+			await expect(physicsFolder).toBeVisible();
+			if ((await physicsFolder.getAttribute("aria-expanded")) !== "true") {
+				await physicsFolder.click();
+			}
 			await expect(page.getByText("Kinematics & Projectile Vectors")).toBeVisible();
 		} finally {
 			await context.close();
