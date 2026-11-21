@@ -50,6 +50,10 @@ export async function applyViewport(page, keyOrPreset) {
 		throw new Error(`Invalid viewport preset: ${String(keyOrPreset)}`);
 	}
 	await page.setViewportSize({ width: vp.width, height: vp.height });
+	// Wait two animation frames so WebKit finishes post-resize reflow before geometry assertions.
+	await page.evaluate(
+		() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+	);
 	return vp;
 }
 

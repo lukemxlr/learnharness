@@ -254,17 +254,21 @@ test.describe("Tier 2 — F9: Attachment Edge Cases, Errors & Multi-Modal Paste"
 			await freeInput.fill("[ECHO_VISION] wait for upload");
 
 			let releaseUpload;
+			const holdRelease = new Promise((r) => {
+				releaseUpload = r;
+			});
+			let resolveUploadStarted;
 			const uploadStarted = new Promise((resolve) => {
-				page.route("**/api/attachments", async (route) => {
-					if (route.request().method() === "POST") {
-						resolve();
-						await new Promise((r) => {
-							releaseUpload = r;
-						});
-						return route.continue();
-					}
-					return route.continue();
-				});
+				resolveUploadStarted = resolve;
+			});
+			await page.route("**/api/attachments", async (route) => {
+				if (route.request().method() === "POST") {
+					resolveUploadStarted();
+					const response = await route.fetch();
+					await holdRelease;
+					return route.fulfill({ response });
+				}
+				return route.continue();
 			});
 
 			await dispatchClipboardPaste(freeInput, { pngBuffer: png });
