@@ -253,31 +253,39 @@ test.describe("Tier 2 — F9: Attachment Edge Cases, Errors & Multi-Modal Paste"
 			await expect(freeInput).toBeVisible({ timeout: 15_000 });
 			await freeInput.fill("[ECHO_VISION] wait for upload");
 
-			let releaseUpload;
-			const holdRelease = new Promise((r) => {
-				releaseUpload = r;
-			});
-			let resolveUploadStarted;
-			const uploadStarted = new Promise((resolve) => {
-				resolveUploadStarted = resolve;
-			});
-			await page.route("**/api/attachments", async (route) => {
-				if (route.request().method() === "POST") {
-					resolveUploadStarted();
-					const response = await route.fetch();
-					await holdRelease;
-					return route.fulfill({ response });
-				}
-				return route.continue();
+			// Hold POST /api/attachments response in-page rather than via page.route():
+			// Playwright WebKit's route interceptor strips FormData File bytes on multipart POSTs.
+			await page.evaluate(() => {
+				const origFetch = window.fetch.bind(window);
+				let releaseFn = null;
+				const releasePromise = new Promise((resolve) => {
+					releaseFn = resolve;
+				});
+				window.__t2f905UploadStarted = false;
+				window.__t2f905ReleaseUpload = () => {
+					releaseFn?.();
+				};
+				window.fetch = async (input, init) => {
+					const url = typeof input === "string" ? input : input instanceof Request ? input.url : String(input);
+					const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+					if (url.includes("/api/attachments") && method === "POST") {
+						window.__t2f905UploadStarted = true;
+						const responsePromise = origFetch(input, init);
+						await releasePromise;
+						window.fetch = origFetch;
+						return await responsePromise;
+					}
+					return origFetch(input, init);
+				};
 			});
 
 			await dispatchClipboardPaste(freeInput, { pngBuffer: png });
-			await uploadStarted;
+			await page.waitForFunction(() => Boolean(window.__t2f905UploadStarted), { timeout: 10_000 });
 
 			const submitBtn = page.getByRole("button", { name: /Submit answer/i });
 			await expect(submitBtn).toBeDisabled();
 
-			releaseUpload();
+			await page.evaluate(() => window.__t2f905ReleaseUpload?.());
 			await expect(dock.locator("img")).toHaveCount(1, { timeout: 10_000 });
 			await expect(submitBtn).toBeEnabled();
 

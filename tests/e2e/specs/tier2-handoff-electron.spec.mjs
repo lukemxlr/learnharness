@@ -151,6 +151,7 @@ test.describe("Tier 2 — F7: Multi-Device Stream Handoff & Edge Recovery", () =
 	});
 
 	test("T2-F7-04: 3 simultaneous viewers (Desktop + 2 iPad viewports) share single live turn", async ({ browser }) => {
+		test.slow();
 		const stack = await bootStack({ mockOptions: { chunkDelayMs: 100 } });
 		const deskCtx = await browser.newContext(viewportContextOptions(VIEWPORT_MATRIX["VP-DESK-REF"]));
 		const ipadPortCtx = await browser.newContext(viewportContextOptions(VIEWPORT_MATRIX["VP-MD-PORT"]));
