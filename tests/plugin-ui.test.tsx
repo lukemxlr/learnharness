@@ -420,8 +420,10 @@ describe("controlled plugin UI", () => {
 		const { document } = parseHTML(renderToStaticMarkup(<ModelPickerPill>Fixture model</ModelPickerPill>));
 		const trigger = document.querySelector("button")!;
 		for (const token of ["font-ui", "text-xs"]) assert.ok(trigger.classList.contains(token), token);
-		assert.equal(trigger.querySelector("span")!.className, "text-card-foreground", "label color stays native foreground");
-		assert.equal(trigger.querySelector("[aria-hidden]")!.className, "text-xs text-muted-foreground");
+		const label = trigger.querySelector("span")!;
+		for (const token of ["text-card-foreground", "truncate"]) assert.ok(label.classList.contains(token), token);
+		const chevron = trigger.querySelector("[aria-hidden]")!;
+		for (const token of ["text-xs", "text-muted-foreground", "shrink-0"]) assert.ok(chevron.classList.contains(token), token);
 	});
 
 	it("standard composer keeps only the input row inside the frame and controls below it", () => {

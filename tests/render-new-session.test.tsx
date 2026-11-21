@@ -96,11 +96,11 @@ describe("startDraftSession — the create-on-send contract", () => {
 });
 
 describe("DraftShell — the sessionless surface", () => {
-	it("storage failure leaves the full draft editable beside the approved error", () => {
+	it("storage failure renders the full draft beside the approved error", () => {
 		const html = renderToStaticMarkup(<DraftShell busy={false} text="keep all my text" onChange={() => {}} onSend={() => {}} startError />);
 		assert.ok(html.includes('role="alert"'));
 		assert.ok(html.includes(OPENING_PROMPT_FAILURE));
-		assert.match(html, /<div[^>]*role="textbox"[^>]*contentEditable="true"[^>]*>keep all my text<\/div>/);
+		assert.match(html, /<div[^>]*role="textbox"[^>]*contentEditable="false"[^>]*>keep all my text<\/div>/);
 	});
 	it("renders the composer blob, the stats bar, and the fresh-chat empty state", () => {
 		const html = renderToStaticMarkup(

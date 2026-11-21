@@ -11,6 +11,7 @@ import {
 } from "../harness/server-controller.mjs";
 import {
 	bootStack,
+	composerInput,
 	createChatSession,
 	DEFAULT_USER,
 	loginApi,
@@ -203,7 +204,7 @@ test.describe("Tier 1 — F2: Isolated Test LLM Provider & Synthetic Fixtures", 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`, { waitUntil: "domcontentloaded" });
 
-			const input = page.getByTestId("composer").locator("[data-file-path-input]");
+			const input = composerInput(page);
 			await input.click();
 			await input.fill("[STREAM_LONG] Explain projectile motion");
 			await page.getByRole("button", { name: "Send" }).click();
@@ -228,14 +229,14 @@ test.describe("Tier 1 — F2: Isolated Test LLM Provider & Synthetic Fixtures", 
 			await loginBrowser(page, stack.baseUrl);
 
 			await page.goto(`${stack.baseUrl}/chat/${mcChat.id}`);
-			const mcInput = page.getByTestId("composer").locator("[data-file-path-input]");
+			const mcInput = composerInput(page);
 			await mcInput.fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 			await expect(page.getByRole("radio").first()).toBeVisible();
 
 			await page.goto(`${stack.baseUrl}/chat/${freeChat.id}`);
-			const freeInput = page.getByTestId("composer").locator("[data-file-path-input]");
+			const freeInput = composerInput(page);
 			await freeInput.fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
@@ -391,7 +392,8 @@ test.describe("Tier 1 — F3: LXC / systemd Deployment & Cloudflare Proxy Suppor
 			const created = await createChatSession(stack.baseUrl, cookie, { title: "Restart Survival Session" });
 
 			const stopRes = await stack.ctrl.stop();
-			expect(stopRes.signal === "SIGTERM" || stopRes.code === 0).toBe(true);
+			// Next can handle SIGTERM itself and report the conventional 128 + 15 exit code.
+			expect(stopRes.signal === "SIGTERM" || stopRes.code === 0 || stopRes.code === 143, JSON.stringify(stopRes)).toBe(true);
 
 			await stack.ctrl.start({ port: stack.port });
 			const chatRes = await fetch(`${stack.baseUrl}/api/chats/${created.id}`, {

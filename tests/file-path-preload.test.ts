@@ -96,6 +96,7 @@ describe("path-only preload bridge", () => {
 	it("retains context isolation, sandbox and disabled Node integration in the production window", () => {
 		const main = readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
 		assert.match(main, /webPreferences:\s*\{\s*contextIsolation:\s*true,\s*sandbox:\s*true,\s*nodeIntegration:\s*false,/);
-		assert.match(main, /preload:\s*path\.join\(__dirname,\s*"preload\.cjs"\)/);
+		assert.match(main, /const preloadFile = opts\.preloadFile \?\? \(isRemote \? "preload-remote\.cjs" : "preload\.cjs"\)/);
+		assert.match(main, /preload:\s*path\.join\(__dirname,\s*preloadFile\)/);
 	});
 });

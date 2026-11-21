@@ -221,7 +221,7 @@ test.describe("Tier 2 — F5: Headless OAuth Boundaries & Model Catalog Resilien
 
 			await page.getByTestId("stats-model").click();
 			await expect(page.getByTestId("model-menu")).toBeVisible();
-			await expect(page.getByTestId("model-menu").getByText("gpt-test-7-pro")).toBeVisible();
+			await expect(page.getByTestId("model-menu").getByTestId("model-option-gpt-test-7-pro")).toBeVisible();
 		} finally {
 			await context.close();
 			await stack.cleanup();
@@ -372,7 +372,7 @@ test.describe("Tier 2 — F5: Headless OAuth Boundaries & Model Catalog Resilien
 			await loginBrowser(page, stack.baseUrl);
 			await page.getByTestId("stats-model").click();
 			await page.getByTestId("model-search").fill("gpt-test-bare");
-			await expect(page.getByTestId("model-menu").getByText("gpt-test-bare")).toBeVisible();
+			await expect(page.getByTestId("model-menu").getByTestId("model-option-gpt-test-bare")).toBeVisible();
 		} finally {
 			await context.close();
 			await stack.cleanup();
@@ -406,7 +406,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const dry = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -420,7 +420,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const apply = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -457,7 +457,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const imp = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -491,7 +491,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const first = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -519,7 +519,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const second = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -552,7 +552,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const first = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -573,7 +573,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const second = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -608,7 +608,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const first = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -629,7 +629,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const second = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -664,7 +664,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const baselineImp = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,
@@ -682,7 +682,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const chatVerImp = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				futureChatBundle,
 				"--target",
 				targetDir,
@@ -705,7 +705,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 
 			const manifestVerImp = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				futureManifestBundle,
 				"--target",
 				targetDir,
@@ -720,7 +720,7 @@ test.describe("Tier 2 — F6: Profile Migration Diagnostics, Idempotency & Confl
 				fs.writeFileSync(bundleGraphFormatPath, JSON.stringify({ version: 99 }, null, "\t") + "\n", "utf8");
 				const graphVerImp = await ctrl.runMigrateCli([
 					"import",
-					"--source",
+					"--bundle",
 					futureGraphBundle,
 					"--target",
 					targetDir,

@@ -26,6 +26,7 @@ import {
 } from "../helpers/drawing-pad.mjs";
 import {
 	bootStack,
+	composerInput,
 	createChatSession,
 	DEFAULT_USER,
 	loginApi,
@@ -96,7 +97,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 
 			await loginBrowser(deskPage, stack.baseUrl);
 			await deskPage.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await deskPage.getByTestId("composer").locator("[data-file-path-input]").fill("[STREAM_LONG] desktop launch");
+			await composerInput(deskPage).fill("[STREAM_LONG] desktop launch");
 			await deskPage.getByRole("button", { name: "Send" }).click();
 			await expect(deskPage.getByText("Chunk 01/25:")).toBeVisible({ timeout: 10_000 });
 
@@ -109,7 +110,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 
 			// Tutor poses Free-Response question; iPad draws on Light paper inside Dark app
 			await stack.mock.admin({ chunkDelayMs: 5 });
-			await ipadPage.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(ipadPage).fill("[TRIGGER_FREE]");
 			await ipadPage.getByRole("button", { name: "Send" }).click();
 			await expect(ipadPage.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -198,7 +199,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 
 			const dry = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				dryRunTarget,
@@ -210,7 +211,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 
 			const imp1 = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				stack.ctrl.dataDir,
@@ -223,7 +224,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 			// Second --apply must be strictly idempotent
 			const imp2 = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				stack.ctrl.dataDir,
@@ -257,7 +258,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/chat_synth_teach_01`);
 			await expect(page.getByText(/trajectory forms a parabola/i)).toBeVisible();
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("Follow-up after LXC cutover");
+			await composerInput(page).fill("Follow-up after LXC cutover");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByText(/Follow-up after LXC cutover/i)).toBeVisible({ timeout: 15_000 });
 		} finally {
@@ -291,7 +292,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 				buffer: pdf,
 			});
 			await expect(page.getByText(/sample-3page\.pdf/i)).toBeVisible();
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("Explain page 2 trajectory equation");
+			await composerInput(page).fill("Explain page 2 trajectory equation");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByText(/Synthetic tutor response/i)).toBeVisible({ timeout: 15_000 });
 			expect(JSON.stringify((await stack.mock.getRequests()).requests.at(-1))).toContain(
@@ -299,7 +300,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 			);
 
 			// Trigger MC question, pick option C, test text paste & transient 500 image paste failure, then retry
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 			const dock = page.getByTestId("question-dock");
 			await expect(dock).toBeVisible({ timeout: 15_000 });
@@ -357,7 +358,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const dock = page.getByTestId("question-dock");
@@ -487,7 +488,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 			await page.getByTestId("model-menu").getByText("gpt-test-9-nova").first().click();
 			await expect(page.getByTestId("stats-model")).toContainText(/gpt-test-9-nova/i);
 
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("Verify gpt-test-9-nova turn");
+			await composerInput(page).fill("Verify gpt-test-9-nova turn");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByText(/Synthetic tutor response/i)).toBeVisible({ timeout: 15_000 });
 
@@ -703,7 +704,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 
 			// Session 1 Q1 (Free-Response): Karoraster + Light paper in Dark app
 			await ipadPage.goto(`${stack.baseUrl}/chat/${s1.id}`);
-			await ipadPage.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE] Q1");
+			await composerInput(ipadPage).fill("[TRIGGER_FREE] Q1");
 			await ipadPage.getByRole("button", { name: "Send" }).click();
 			await expect(ipadPage.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -718,7 +719,7 @@ test.describe("Tier 4 — Real-World End-to-End Application Scenarios", () => {
 			await expect(ipadPage.getByText(/VISION_ECHO count=1/).first()).toBeVisible({ timeout: 15_000 });
 
 			// Session 1 Q2 (MC): Drawing Pad opens blank, draw, close, reopen restored, Add to answer, pick A, submit
-			await ipadPage.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC] Q2");
+			await composerInput(ipadPage).fill("[TRIGGER_MC] Q2");
 			await ipadPage.getByRole("button", { name: "Send" }).click();
 			await expect(ipadPage.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 

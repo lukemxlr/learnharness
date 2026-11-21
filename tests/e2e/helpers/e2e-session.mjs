@@ -91,12 +91,18 @@ export async function loginBrowser(
 	baseUrl,
 	{ username = DEFAULT_USER.username, password = DEFAULT_USER.password } = {},
 ) {
-	await page.goto(`${baseUrl}/`, { waitUntil: "domcontentloaded" });
+	const timeout = 30_000;
+	await page.goto(`${baseUrl}/`, { waitUntil: "commit" });
 	await expect(page).toHaveURL(/\/login/);
+	const submit = page.getByTestId("login-submit");
+	await expect(submit).toBeEnabled({ timeout });
 	await page.getByTestId("login-username").fill(username);
 	await page.getByTestId("login-password").fill(password);
-	await page.getByTestId("login-submit").click();
-	await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15_000 });
+	await submit.click({ timeout });
+	await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
+		waitUntil: "commit",
+		timeout,
+	});
 }
 
 export async function createChatSession(baseUrl, cookie, body = {}) {
@@ -3120,11 +3126,17 @@ export async function assertPopoversInViewport(page) {
 	expect(clipped).toEqual([]);
 }
 
+const READY_PATH_INPUT = '[data-file-path-input][contenteditable="true"]';
+
+export function composerInput(page) {
+	return page.getByTestId("composer").locator(READY_PATH_INPUT);
+}
+
 export function questionInput(page, field = "answer") {
 	if (field !== "answer" && field !== "thinking") {
 		throw new Error(`Invalid questionInput field: ${field}`);
 	}
-	return page.getByTestId(`${field}-field`).locator("[data-file-path-input]");
+	return page.getByTestId(`${field}-field`).locator(READY_PATH_INPUT);
 }
 
 export async function assertTouchTargets(page, selectors) {

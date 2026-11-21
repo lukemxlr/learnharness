@@ -314,6 +314,21 @@ describe("M5 iPadOS / WebKit UI & Responsive Primitives", () => {
 		assert.equal(probeInputAfter?.value, "preserved-across-resize");
 	});
 
+	it("keeps sign-in controls disabled until hydration and never submits credentials in the URL", async () => {
+		const login = <LoginForm nextPath="/" configured />;
+		const ssr = parseHTML(renderToStaticMarkup(login)).document;
+		assert.equal(ssr.querySelector("form")!.getAttribute("method"), "post");
+		for (const id of ["login-username", "login-password", "login-submit"]) {
+			assert.ok(ssr.querySelector(`[data-testid="${id}"]`)!.hasAttribute("disabled"), id);
+		}
+
+		setupDom({ width: 820, height: 1180 });
+		await act(async () => { root!.render(login); });
+		for (const id of ["login-username", "login-password", "login-submit"]) {
+			assert.equal(document.querySelector(`[data-testid="${id}"]`)!.hasAttribute("disabled"), false, id);
+		}
+	});
+
 	it("renders remote-mode 'Change Server URL' affordance on LoginForm and Settings General only when window.lh.isRemoteMode is active", async () => {
 		const dom = setupDom({ width: 820, height: 1180 });
 		let calls = 0;

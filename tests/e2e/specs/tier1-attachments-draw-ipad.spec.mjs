@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
+import { closeDrawingPad, openDrawingPad, toggleKarorasterGrid, toggleQuestionContext } from "../helpers/drawing-pad.mjs";
 import { resolveRepoDir } from "../harness/server-controller.mjs";
 import {
 	assertNoHorizontalOverflow,
 	assertPopoversInViewport,
 	assertTouchTargets,
 	bootStack,
+	composerInput,
 	createChatSession,
 	loginApi,
 	loginBrowser,
@@ -102,7 +104,7 @@ test.describe("Tier 1 — F9: Chat & Question Attachments (Images, PDFs, Ctrl+V)
 			});
 			await expect(page.getByText(/vector-upload\.png/i)).toBeVisible();
 
-			const input = page.getByTestId("composer").locator("[data-file-path-input]");
+			const input = composerInput(page);
 			await input.fill("[ECHO_VISION] inspect uploaded diagram");
 			await page.getByRole("button", { name: "Send" }).click();
 
@@ -140,7 +142,7 @@ test.describe("Tier 1 — F9: Chat & Question Attachments (Images, PDFs, Ctrl+V)
 			});
 			await expect(page.getByText(/sample-3page\.pdf/i)).toBeVisible();
 
-			const input = page.getByTestId("composer").locator("[data-file-path-input]");
+			const input = composerInput(page);
 			await input.fill("Summarize page 2 trajectory equation");
 			await page.getByRole("button", { name: "Send" }).click();
 
@@ -168,7 +170,7 @@ test.describe("Tier 1 — F9: Chat & Question Attachments (Images, PDFs, Ctrl+V)
 
 			// Free-response paste
 			await page.goto(`${stack.baseUrl}/chat/${freeChat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			const freeInput = questionInput(page, "answer");
 			await expect(freeInput).toBeVisible({ timeout: 15_000 });
@@ -179,7 +181,7 @@ test.describe("Tier 1 — F9: Chat & Question Attachments (Images, PDFs, Ctrl+V)
 
 			// MC thinking paste
 			await page.goto(`${stack.baseUrl}/chat/${mcChat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 			const mcInput = questionInput(page, "thinking");
 			await expect(mcInput).toBeVisible({ timeout: 15_000 });
@@ -202,7 +204,7 @@ test.describe("Tier 1 — F9: Chat & Question Attachments (Images, PDFs, Ctrl+V)
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
@@ -237,7 +239,7 @@ test.describe("Tier 1 — F9: Chat & Question Attachments (Images, PDFs, Ctrl+V)
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const freeInput = questionInput(page, "answer");
@@ -272,7 +274,7 @@ test.describe("Tier 1 — F9: Chat & Question Attachments (Images, PDFs, Ctrl+V)
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const freeInput = questionInput(page, "answer");
@@ -307,11 +309,11 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			const canvas = page.locator("canvas.drawing-pad-ink");
 			await expect(canvas).toBeVisible();
 			const box = await canvas.boundingBox();
@@ -319,9 +321,9 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 			expect(box.height).toBeGreaterThan(600);
 
 			// Toggle Karoraster grid & Question context bar
-			await page.getByRole("button", { name: /grid|karo/i }).click();
-			await page.getByRole("button", { name: /question/i }).click();
-			await expect(page.getByText(/horizontal and vertical components/i)).toBeVisible();
+			await toggleKarorasterGrid(page);
+			await toggleQuestionContext(page);
+			await expect(page.locator(".drawing-pad-question-drawer").getByText(/horizontal and vertical components/i)).toBeVisible();
 		} finally {
 			await context.close();
 			await stack.cleanup();
@@ -335,7 +337,7 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 		try {
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/chat_synth_teach_01`);
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			const canvas = page.locator("canvas.drawing-pad-ink");
 			await expect(canvas).toBeVisible();
 			const beforeDraw = await canvas.evaluate((c) => c.toDataURL("image/png"));
@@ -347,7 +349,7 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 			const afterOne = await canvas.evaluate((c) => c.toDataURL("image/png"));
 			expect(afterOne).not.toBe(beforeDraw);
 
-			const colorBtn = page.getByRole("button", { name: /blue|red|green|color/i }).first();
+			const colorBtn = page.getByRole("button", { name: "Blue ink", exact: true });
 			await expect(colorBtn).toBeVisible();
 			await colorBtn.click();
 
@@ -398,11 +400,11 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			await page.getByRole("button", { name: /light/i }).click();
 
 			const canvas = page.locator("canvas.drawing-pad-ink");
@@ -458,11 +460,11 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			const canvas = page.locator("canvas.drawing-pad-ink");
 			await expect(canvas).toBeVisible();
 			const blankSnapshot = await canvas.evaluate((c) => c.toDataURL("image/png"));
@@ -474,7 +476,7 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 			expect(drawnSnapshot).not.toBe(blankSnapshot);
 
 			await page.getByRole("button", { name: /Close|×/i }).first().click();
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			const reopenedSnapshot = await canvas.evaluate((c) => c.toDataURL("image/png"));
 			expect(reopenedSnapshot).toBe(drawnSnapshot);
 
@@ -484,10 +486,10 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 			await page.getByRole("button", { name: /Submit answer/i }).click();
 			await expect(page.getByText(/Synthetic tutor response/i).last()).toBeVisible({ timeout: 15_000 });
 
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE] Q2 follow-up");
+			await composerInput(page).fill("[TRIGGER_FREE] Q2 follow-up");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			await expect(canvas).toBeVisible();
 			const q2InitialSnapshot = await canvas.evaluate((c) => c.toDataURL("image/png"));
 			expect(q2InitialSnapshot).not.toBe(drawnSnapshot);
@@ -511,12 +513,12 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 
 			for (const [cId, trigger] of [[freeChat.id, "[TRIGGER_FREE]"], [mcChat.id, "[TRIGGER_MC]"]]) {
 				await page.goto(`${stack.baseUrl}/chat/${cId}`);
-				await page.getByTestId("composer").locator("[data-file-path-input]").fill(trigger);
+				await composerInput(page).fill(trigger);
 				await page.getByRole("button", { name: "Send" }).click();
 				await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
 				await stack.mock.clearRequests();
-				await page.getByRole("button", { name: /Draw/i }).click();
+				await openDrawingPad(page);
 				const canvas = page.locator("canvas.drawing-pad-ink");
 				await drawCanvasStroke(page, canvas, {
 					pointerType: "pen",
@@ -539,7 +541,7 @@ test.describe("Tier 1 — F10: Overhauled Drawing Pad (Bild 3 -> Bild 1)", () =>
 		try {
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/chat_synth_teach_01`);
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			const canvas = page.locator("canvas.drawing-pad-ink");
 			await expect(canvas).toBeVisible();
 
@@ -596,7 +598,7 @@ test.describe("Tier 1 — F11: iPadOS Safari / WebKit Responsive Shell & Touch E
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const freeInput = questionInput(page, "answer");
@@ -670,7 +672,7 @@ test.describe("Tier 1 — F11: iPadOS Safari / WebKit Responsive Shell & Touch E
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
@@ -678,7 +680,7 @@ test.describe("Tier 1 — F11: iPadOS Safari / WebKit Responsive Shell & Touch E
 			await questionInput(page, "thinking").fill("Preserved orientation reasoning");
 
 			// Also create a Drawing Pad draft before rotating / resizing to Split View
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			const canvas = page.locator("canvas.drawing-pad-ink");
 			await expect(canvas).toBeVisible();
 			await drawCanvasStroke(page, canvas, {
@@ -688,15 +690,17 @@ test.describe("Tier 1 — F11: iPadOS Safari / WebKit Responsive Shell & Touch E
 			const drawnDataUrl = await canvas.evaluate((c) => c.toDataURL("image/png"));
 			const drawnStats = analyzePngPixels(Buffer.from(drawnDataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));
 			expect(drawnStats.strokePixelCount).toBeGreaterThan(0);
-			await page.getByRole("button", { name: /Close|×/i }).first().click();
+			await closeDrawingPad(page);
+			await expect(canvas).toBeHidden();
 
 			await page.setViewportSize({ width: 1180, height: 820 });
+			await expect.poll(() => page.evaluate(() => [innerWidth, innerHeight])).toEqual([1180, 820]);
 			await page.setViewportSize({ width: 375, height: 1024 });
 
 			await expect(page.getByRole("radio").nth(1)).toHaveAttribute("aria-checked", "true");
 			await expect(questionInput(page, "thinking")).toContainText("Preserved orientation reasoning");
 
-			await page.getByRole("button", { name: /Draw/i }).click();
+			await openDrawingPad(page);
 			await expect(canvas).toBeVisible();
 			const reopenedDataUrl = await canvas.evaluate((c) => c.toDataURL("image/png"));
 			const reopenedStats = analyzePngPixels(Buffer.from(reopenedDataUrl.replace(/^data:image\/png;base64,/, ""), "base64"));

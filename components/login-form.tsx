@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useSyncExternalStore, type FormEvent } from "react";
 import { sanitizeNextPath } from "@/src/core";
 import { useCanChangeServerUrl } from "@/components/remote-server";
+
+const noopSubscribe = () => () => {};
 
 export function LoginForm({
 	nextPath,
@@ -16,6 +18,8 @@ export function LoginForm({
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
 	const canChangeServerUrl = useCanChangeServerUrl();
+	const ready = useSyncExternalStore(noopSubscribe, () => true, () => false);
+	const controlsDisabled = !ready || submitting;
 
 	async function handleSubmit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -63,7 +67,7 @@ export function LoginForm({
 					</div>
 				)}
 
-				<form onSubmit={(e) => void handleSubmit(e)} className="mt-5 flex flex-col gap-4">
+				<form method="post" onSubmit={(e) => void handleSubmit(e)} className="mt-5 flex flex-col gap-4">
 					<div className="flex flex-col gap-1.5">
 						<label htmlFor="lh-username" className="text-xs font-medium text-foreground">
 							Username
@@ -78,7 +82,7 @@ export function LoginForm({
 							required
 							value={username}
 							onChange={(e) => setUsername(e.target.value)}
-							disabled={submitting}
+							disabled={controlsDisabled}
 							data-testid="login-username"
 							className="min-h-[44px] w-full rounded-md border border-border bg-background px-3 py-2 text-[16px] text-foreground outline-none focus:border-ring"
 						/>
@@ -96,7 +100,7 @@ export function LoginForm({
 							required
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
-							disabled={submitting}
+							disabled={controlsDisabled}
 							data-testid="login-password"
 							className="min-h-[44px] w-full rounded-md border border-border bg-background px-3 py-2 text-[16px] text-foreground outline-none focus:border-ring"
 						/>
@@ -110,7 +114,7 @@ export function LoginForm({
 
 					<button
 						type="submit"
-						disabled={submitting || !configured}
+						disabled={controlsDisabled || !configured}
 						data-testid="login-submit"
 						className="min-h-[44px] w-full cursor-pointer rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
 					>

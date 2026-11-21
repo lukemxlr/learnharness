@@ -23,6 +23,7 @@ import {
 } from "../helpers/drawing-pad.mjs";
 import {
 	bootStack,
+	composerInput,
 	createChatSession,
 	loginApi,
 	loginBrowser,
@@ -67,7 +68,7 @@ test.describe("Tier 2 — F9: Attachment Edge Cases, Errors & Multi-Modal Paste"
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const dock = page.getByTestId("question-dock");
@@ -113,7 +114,7 @@ test.describe("Tier 2 — F9: Attachment Edge Cases, Errors & Multi-Modal Paste"
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const dock = page.getByTestId("question-dock");
@@ -197,7 +198,7 @@ test.describe("Tier 2 — F9: Attachment Edge Cases, Errors & Multi-Modal Paste"
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const dock = page.getByTestId("question-dock");
@@ -244,7 +245,7 @@ test.describe("Tier 2 — F9: Attachment Edge Cases, Errors & Multi-Modal Paste"
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const dock = page.getByTestId("question-dock");
@@ -303,7 +304,7 @@ test.describe("Tier 2 — F10: Drawing Pad Contrast, Stack Boundaries & Draft Sc
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -345,7 +346,7 @@ test.describe("Tier 2 — F10: Drawing Pad Contrast, Stack Boundaries & Draft Sc
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -383,7 +384,7 @@ test.describe("Tier 2 — F10: Drawing Pad Contrast, Stack Boundaries & Draft Sc
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			const dock = page.getByTestId("question-dock");
 			await expect(dock).toBeVisible({ timeout: 15_000 });
@@ -475,7 +476,7 @@ test.describe("Tier 2 — F10: Drawing Pad Contrast, Stack Boundaries & Draft Sc
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			const dock = page.getByTestId("question-dock");
 			await expect(dock).toBeVisible({ timeout: 15_000 });
@@ -507,7 +508,7 @@ test.describe("Tier 2 — F10: Drawing Pad Contrast, Stack Boundaries & Draft Sc
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE] Q1");
+			await composerInput(page).fill("[TRIGGER_FREE] Q1");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -521,7 +522,7 @@ test.describe("Tier 2 — F10: Drawing Pad Contrast, Stack Boundaries & Draft Sc
 			await expect(page.getByText(/VISION_ECHO count=1/)).toBeVisible({ timeout: 15_000 });
 			await expect(page.locator("main img").first()).toBeVisible();
 
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE] Q2");
+			await composerInput(page).fill("[TRIGGER_FREE] Q2");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -545,7 +546,7 @@ test.describe("Tier 2 — F11: iPad Edge Responsive & Keyboard Interaction Cases
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 			const dock = page.getByTestId("question-dock");
 			await expect(dock).toBeVisible({ timeout: 15_000 });
@@ -705,7 +706,7 @@ test.describe("Tier 2 — F11: iPad Edge Responsive & Keyboard Interaction Cases
 			// Add long transcript history so main scroll container scrolls > 120px
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			const composer = page.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(page);
 			await composer.fill("[STREAM_LONG] populate transcript for scroll test");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByText("Chunk 25/25:")).toBeVisible({ timeout: 20_000 });
@@ -788,7 +789,7 @@ test.describe("Tier 2 — F12: Extreme Split-View, Short Landscape, Touch Target
 			const search = page.getByTestId("model-search");
 			await expect(search).toBeVisible();
 			await search.fill("gpt-test");
-			await expect(menu.getByText("gpt-test-1")).toBeVisible();
+			await expect(menu.getByTestId("model-option-gpt-test-1")).toBeVisible();
 			await assertPopoversInViewport(page);
 
 			const menuBox = await menu.boundingBox();
@@ -810,13 +811,13 @@ test.describe("Tier 2 — F12: Extreme Split-View, Short Landscape, Touch Target
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
 			const canvas = await openDrawingPad(page);
 			await toggleQuestionContext(page);
-			await expect(page.getByText(/horizontal and vertical components/i)).toBeVisible();
+			await expect(page.locator(".drawing-pad-question-drawer").getByText(/horizontal and vertical components/i)).toBeVisible();
 			await assertNoHorizontalOverflow(page);
 
 			await toggleQuestionContext(page);
@@ -838,7 +839,7 @@ test.describe("Tier 2 — F12: Extreme Split-View, Short Landscape, Touch Target
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -880,18 +881,30 @@ test.describe("Tier 2 — F12: Extreme Split-View, Short Landscape, Touch Target
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
+			const drawAction = '[data-plugin-action="drawing-pad/draw"]';
+			await expect(page.locator(drawAction)).toBeVisible();
 			await assertTouchTargets(page, [
 				'[aria-label="Open sidebar"]',
 				'[data-testid="stats-model"]',
 				'[aria-label="Send"]',
 				'[aria-label="Attach files"]',
-				'[data-plugin-action="drawing-pad/draw"]',
+				drawAction,
 			]);
 
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
-			await expect(page.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
-			await assertTouchTargets(page, ['[data-testid="question-dock"] button']);
+			const dock = page.getByTestId("question-dock");
+			const revealSelector = '[data-testid="question-dock-bar"], [data-testid="teach-check-reveal"]';
+			const reveal = page.locator(revealSelector);
+			const firstOption = dock.getByRole("radio").first();
+			await expect(firstOption.or(reveal).first()).toBeVisible({ timeout: 15_000 });
+			if (await reveal.isVisible()) {
+				await assertTouchTargets(page, [revealSelector]);
+				await reveal.click();
+			}
+			await firstOption.click();
+			await expect(dock.getByRole("button", { name: "Submit answer" })).toBeEnabled();
+			await assertTouchTargets(page, ['[data-testid="question-dock"] button:enabled']);
 		} finally {
 			await context.close();
 			await stack.cleanup();
@@ -929,7 +942,7 @@ test.describe("Tier 2 — F12: Extreme Split-View, Short Landscape, Touch Target
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/chat_synth_teach_01`);
 
-			const composer = page.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(page);
 			await composer.fill("Breakpoint state check draft");
 			await assertResponsiveShell(page, {
 				inViewportSelectors: ['[data-testid="composer"]', '[data-testid="stats-model"]'],

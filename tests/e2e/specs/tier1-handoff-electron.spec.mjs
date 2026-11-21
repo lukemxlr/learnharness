@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import { resolveRepoDir, runNode26Cli } from "../harness/server-controller.mjs";
 import {
 	bootStack,
+	composerInput,
 	createChatSession,
 	loginApi,
 	loginBrowser,
@@ -101,7 +102,7 @@ test.describe("Tier 1 — F7: Live Stream Keepalive & Multi-Device Resync Handof
 			await loginBrowser(ipadPage, stack.baseUrl);
 
 			await desktopPage.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			const composer = desktopPage.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(desktopPage);
 			await composer.fill("[STREAM_LONG] projectile handoff");
 			await desktopPage.getByRole("button", { name: "Send" }).click();
 
@@ -146,7 +147,7 @@ test.describe("Tier 1 — F7: Live Stream Keepalive & Multi-Device Resync Handof
 				return route.continue();
 			});
 
-			const composer = desktopPage.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(desktopPage);
 			await composer.fill("[STREAM_LONG] wake resync");
 			await desktopPage.getByRole("button", { name: "Send" }).click();
 			await expect(desktopPage.getByText("Chunk 03/25:")).toBeVisible({ timeout: 10_000 });
@@ -188,7 +189,7 @@ test.describe("Tier 1 — F7: Live Stream Keepalive & Multi-Device Resync Handof
 				return route.continue();
 			});
 
-			const composer = page.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(page);
 			await composer.fill("[STREAM_LONG] transient drop");
 			await page.getByRole("button", { name: "Send" }).click();
 

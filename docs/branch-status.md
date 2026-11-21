@@ -1,6 +1,10 @@
 # Branch Status — `feat/lxc-server-ipad-draw-migration`
 
-Last updated: 2026-11-19T21:02:47Z (Urgent Laptop Shutdown Checkpoint)
+## Current status (2026-11-20)
+
+The iPadOS Safari implementation in `7298239` has follow-up fixes in the working tree for editor and sign-in readiness. Rotation and integration acceptance remain open. See the [developer handover](developer-handover.md#42-milestone-verification-status) for acceptance results and the [manual checklist](../tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md) for the physical iPad, Windows VM, and live LXC checks.
+
+## Checkpoint from 2026-11-19
 
 ## Completed, Gate PASS & Locally Committed
 - **M0**: Cloned `https://github.com/amosblomqvist/learnharness` (`cb25c8e`) into `repo/` on `feat/lxc-server-ipad-draw-migration`; verified Linux Docker images (`node:26-bookworm-slim`, `mcr.microsoft.com/playwright:noble`).

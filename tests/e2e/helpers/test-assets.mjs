@@ -34,10 +34,10 @@ function pngChunk(type, data) {
 
 /**
  * Zero-dependency RGBA PNG builder.
- * @param {{ width: number, height: number, background?: [number, number, number, number?], draw?: (ctx: { width: number, height: number, setPixel: (x: number, y: number, rgba: number[]) => void, fillRect: (x: number, y: number, w: number, h: number, rgba: number[]) => void, drawLine: (x0: number, y0: number, x1: number, y1: number, rgba: number[], thickness?: number) => void }) => void }} options
+ * @param {{ width: number, height: number, compressionLevel?: number, background?: [number, number, number, number?], draw?: (ctx: { width: number, height: number, setPixel: (x: number, y: number, rgba: number[]) => void, fillRect: (x: number, y: number, w: number, h: number, rgba: number[]) => void, drawLine: (x0: number, y0: number, x1: number, y1: number, rgba: number[], thickness?: number) => void }) => void }} options
  * @returns {Buffer}
  */
-export function buildPng({ width, height, background = [255, 255, 255, 255], draw } = {}) {
+export function buildPng({ width, height, background = [255, 255, 255, 255], draw, compressionLevel = zlib.constants.Z_DEFAULT_COMPRESSION } = {}) {
 	if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
 		throw new Error(`Invalid PNG dimensions: ${width}x${height}`);
 	}
@@ -116,7 +116,7 @@ export function buildPng({ width, height, background = [255, 255, 255, 255], dra
 	ihdr[11] = 0; // filter
 	ihdr[12] = 0; // interlace
 
-	const idat = zlib.deflateSync(raw);
+	const idat = zlib.deflateSync(raw, { level: compressionLevel });
 	return Buffer.concat([
 		PNG_SIGNATURE,
 		pngChunk("IHDR", ihdr),

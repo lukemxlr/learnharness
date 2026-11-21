@@ -164,7 +164,7 @@ export class ServerController {
 		if (!fs.existsSync(src)) {
 			throw new Error(`Synthetic fixture directory not found: ${src}`);
 		}
-		for (const entry of ["settings.json", "chats", "jobs", "graph", "prompts", "themes"]) {
+		for (const entry of ["settings.json", "plugins-state.json", "chats", "jobs", "graph", "prompts", "themes"]) {
 			const from = path.join(src, entry);
 			const to = path.join(this.dataDir, entry);
 			if (fs.existsSync(from)) {

@@ -527,7 +527,7 @@ for (const check of [false, true]) test(`healthy ${check ? "teach" : "probe"} th
 	assert.ok(hint); assert.equal(hint.textContent, "↵ submits · ⇧↵ newline");
 	for (const token of ["pl-1.5", "text-xs", "text-muted-foreground"]) assert.ok(hint.classList.contains(token), token);
 	assert.ok(submit.parentElement?.classList.contains("p-1"));
-	for (const token of ["ml-auto", "h-9", "rounded-[6px]", "px-3.5", "text-sm", "font-medium"]) assert.ok(submit.classList.contains(token), token);
+	for (const token of ["ml-auto", "h-11", "min-h-11", "rounded-[6px]", "px-3.5", "text-sm", "font-medium"]) assert.ok(submit.classList.contains(token), token);
 	assert.equal(document.getElementById("plugin-editor")?.closest("form"), null, "arbitrary plugin DOM stays outside the host form");
 	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "Dismiss question"), false);
 	assert.equal(f.state.dismissed, 0);

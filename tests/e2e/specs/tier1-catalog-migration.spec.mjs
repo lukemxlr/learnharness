@@ -266,7 +266,7 @@ test.describe("Tier 1 — F5: Headless ChatGPT Plus OAuth & Dynamic Model Catalo
 			await page.getByTestId("stats-model").click();
 			await expect(page.getByTestId("model-menu")).toBeVisible();
 			await page.getByTestId("model-search").fill("gpt-test-7-pro");
-			const option = page.getByTestId("model-menu").getByText("gpt-test-7-pro");
+			const option = page.getByTestId("model-menu").getByTestId("model-option-gpt-test-7-pro");
 			await expect(option).toBeVisible();
 			await expect(page.getByTestId("model-menu").getByText(/272k/i)).toBeVisible();
 		} finally {
@@ -347,7 +347,7 @@ test.describe("Tier 1 — F5: Headless ChatGPT Plus OAuth & Dynamic Model Catalo
 			await loginBrowser(page, stack.baseUrl);
 			await page.getByTestId("stats-model").click();
 			await page.getByTestId("model-search").fill("gpt-test-8-mini");
-			await expect(page.getByTestId("model-menu").getByText("gpt-test-8-mini")).toBeVisible();
+			await expect(page.getByTestId("model-menu").getByTestId("model-option-gpt-test-8-mini")).toBeVisible();
 		} finally {
 			await context.close();
 			await stack.cleanup();
@@ -424,8 +424,9 @@ test.describe("Tier 1 — F6: Safe Profile Export/Import & Windows Attachment Mi
 			const afterChecksums = snapshotDirChecksums(sourceCopy);
 			expect(afterChecksums).toEqual(beforeChecksums);
 
-			expect(fs.existsSync(path.join(bundleDir, "export-manifest.json"))).toBe(true);
-			expect(fs.existsSync(path.join(bundleDir, "attachment-manifest.json"))).toBe(true);
+			const manifest = JSON.parse(fs.readFileSync(path.join(bundleDir, "manifest.json"), "utf8"));
+			expect(manifest.counts.chats).toBeGreaterThan(0);
+			expect(manifest.attachments).toEqual(expect.any(Array));
 			expect(fs.existsSync(path.join(bundleDir, "settings.json"))).toBe(true);
 			expect(fs.existsSync(path.join(bundleDir, "chats", "chat_synth_teach_01.json"))).toBe(true);
 			expect(fs.existsSync(path.join(bundleDir, "graph", "nodes.jsonl"))).toBe(true);
@@ -451,7 +452,7 @@ test.describe("Tier 1 — F6: Safe Profile Export/Import & Windows Attachment Mi
 
 			const dry = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				emptyTarget,
@@ -482,7 +483,7 @@ test.describe("Tier 1 — F6: Safe Profile Export/Import & Windows Attachment Mi
 
 			const imp = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				stack.ctrl.dataDir,
@@ -544,7 +545,7 @@ test.describe("Tier 1 — F6: Safe Profile Export/Import & Windows Attachment Mi
 
 			const imp = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				stack.ctrl.dataDir,
@@ -580,7 +581,7 @@ test.describe("Tier 1 — F6: Safe Profile Export/Import & Windows Attachment Mi
 
 			const imp = await ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				targetDir,

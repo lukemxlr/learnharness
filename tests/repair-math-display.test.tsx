@@ -195,9 +195,11 @@ describe("practice display surfaces", () => {
 	});
 
 	it("does not change the collapsed preview, dismissal or global prose renderer", () => {
-		const preview = renderToStaticMarkup(dock({ statement: doubled }, false));
-		assert.ok(preview.includes(doubled));
-		assert.deepEqual(math(preview).annotations, []);
+	const collapsed = renderToStaticMarkup(dock({ statement: doubled }, false));
+	const { document } = parseHTML(collapsed);
+	const preview = document.querySelector('[data-testid="practice-dock-bar"]')!;
+	assert.ok(preview.textContent?.includes(doubled));
+	assert.deepEqual(math(preview.outerHTML).annotations, []);
 		const dismissed = renderToStaticMarkup(<ConcludeCard part={part({ outcome: "dismissed", verdict: doubled }, { reveal: doubled })} />);
 		assert.ok(dismissed.includes("Problem dismissed."));
 		assert.deepEqual(math(dismissed).annotations, []);

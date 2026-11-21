@@ -290,7 +290,6 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			},
 		};
 		paint(saved, false);
-		if (initial.current.autoFocus) { root.focus(); restorePathSelection(root, saved); }
 		root.addEventListener(INSERT_FILE_PATHS_EVENT, insertEvent);
 		root.addEventListener(INSERT_CITATION_EVENT, insertCitationEvent);
 		root.addEventListener(UPDATE_CITATION_EVENT, updateCitationEvent);
@@ -303,7 +302,11 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 		root.addEventListener("compositionstart", startComposition);
 		root.addEventListener("compositionend", endComposition);
 		document.addEventListener("selectionchange", remember);
+		// The initial paint owns the draft until the editor can handle native input.
+		root.setAttribute("contenteditable", "true");
+		if (initial.current.autoFocus) { root.focus(); restorePathSelection(root, saved); }
 		return () => {
+			root.setAttribute("contenteditable", "false");
 			mounted = false;
 			composing.current = false;
 			controllerRef.current = null;
@@ -332,7 +335,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			aria-label={props["aria-label"] ?? placeholder}
 			aria-multiline={singleLine ? "false" : "true"}
 			aria-placeholder={placeholder}
-			contentEditable
+			contentEditable={false}
 			suppressContentEditableWarning
 			data-file-path-input={fileInsertion ? "" : undefined}
 			data-empty={initial.current.value.length === 0 ? "true" : "false"}

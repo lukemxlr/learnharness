@@ -124,13 +124,13 @@ test("textbox exposes accessibility, placeholder, global-drop markers and reques
 	for (const pattern of [/role="textbox"/, /aria-multiline="true"/, /aria-label="Message"/, /data-file-path-input=""/, /data-file-path-default=""/, /data-placeholder="Ask"/, /min-h-24 max-h-64/]) assert.match(html, pattern);
 });
 
-test("SSR preserves the full escaped initial draft without waiting for client effects", () => {
+test("SSR shows the full escaped initial draft and waits for the editor before accepting input", () => {
 	const draft = "  Restored <reasoning> & notes\n`/course/full notes.pdf`\n ";
 	const html = renderToStaticMarkup(<PathInput value={draft} onValueChange={() => assert.fail("SSR cannot emit changes")} placeholder="Reasoning" />);
 	const { document } = parseHTML(`<html><body>${html}</body></html>`);
 	const field = document.querySelector('[data-file-path-input]')!;
 	assert.equal(field.textContent, draft);
-	assert.equal(field.getAttribute("contenteditable") ?? field.getAttribute("contentEditable"), "true");
+	assert.equal(field.getAttribute("contenteditable") ?? field.getAttribute("contentEditable"), "false");
 	assert.equal(field.getAttribute("data-empty"), "false");
 	assert.equal(field.querySelector("reasoning"), null);
 	assert.match(html, /&lt;reasoning&gt;/);
@@ -370,6 +370,7 @@ test("ordinary backward/forward chip deletion and selected ranges retain their e
 test("immutable SSR fallback never stomps native edits, controlled updates, chips or reset", async () => {
 	const initial = "Restored draft `/course/original.pdf`";
 	const f = await fixture(initial);
+	assert.equal(f.root.getAttribute("contenteditable"), "true");
 	assert.equal(readPathInput(f.root), initial);
 	assert.equal(f.root.querySelectorAll(`[${PATH_SOURCE_ATTRIBUTE}]`).length, 1);
 	f.select(initial.length);

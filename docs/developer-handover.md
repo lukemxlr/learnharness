@@ -134,7 +134,7 @@ LearnHarness enforces strict unidirectional dependencies via `import/no-restrict
 
 ## 3. Build, Start & Docker Test Commands
 
-All repository tests and Linux standalone builds are designed to run inside Docker (`node:26-bookworm-slim` / `mcr.microsoft.com/playwright:noble`) mounting only the source checkout and disposable test directories:
+Run the application tests and the Linux standalone build inside Docker using `learnharness-test:node26` and `learnharness-e2e:local`. Use only repository source and disposable test directories:
 
 ```powershell
 # PowerShell wrapper (Windows host -> Docker learnharness-test:node26)
@@ -151,7 +151,7 @@ All repository tests and Linux standalone builds are designed to run inside Dock
 
 ```bash
 # Bash equivalent (Linux / macOS)
-./scripts/docker-test.sh baseline
+bash scripts/docker-test.sh baseline
 ```
 
 ### Playwright WebKit E2E Runner (`tests/e2e/run-docker-e2e.sh`)
@@ -161,6 +161,14 @@ All repository tests and Linux standalone builds are designed to run inside Dock
 bash tests/e2e/run-docker-e2e.sh --selfcheck
 bash tests/e2e/run-docker-e2e.sh --build-app --tier1
 bash tests/e2e/run-docker-e2e.sh --build-app --all
+```
+
+The full run includes 15 harness self-checks and 152 application scenarios across Tiers 1–4. The synthetic profile enables Drawing Pad through its own `plugins-state.json` so the drawing scenarios use the bundled plugin.
+
+On Windows, the wrapper can preserve the report in a disposable directory:
+
+```powershell
+.\tests\e2e\run-docker-e2e.ps1 -E2EArgs @('--build-app', '--all') -ArtifactsDir (Join-Path ([System.IO.Path]::GetTempPath()) 'lh-webkit-report')
 ```
 
 ### Direct Production Start (LXC / Linux Node 26)
@@ -200,8 +208,17 @@ HOSTNAME=0.0.0.0 PORT=3000 NODE_ENV=production node .next/standalone/server.js
 | **M3** (Live Stream Handoff & Electron Remote Client) | **PASS** (`2045a76`) | `live-stream-handoff`, `electron-remote`, `session-core`, `side-chat-ping` suites + Electron preload/config probes (`5/5` gate approvals). |
 | **M4** (Attachments, `Ctrl+V`, PDF/Image Delivery & Drawing Pad) | **PASS** | Unmocked `pdfjs` extraction/rendering probes, WebKit Drawing Pad hit-tests, `73/73` plugin tests, `394/394` targeted suite (`5/5` gate approvals). |
 | **E2E Harness (`M-E2E-1` & `M-E2E-2`)** | **HARNESS READY** | Isolated Playwright WebKit container + `167` Tiers 1–4 specs staged under `tests/e2e/**`. |
-| **M5** (iPadOS Safari / WebKit UI & Responsive Matrix) | `[PENDING FINAL M5/M6 RUN — update after M5/M6 Gate]` | Concurrently in progress; final WebKit matrix results will be recorded after the M5/M6 Gate. |
-| **Combined `M-E2E-3` & M6** (Final Integration Gate: `167` E2E specs + `/tmp/lh-run` full suite & standalone build) | `[PENDING FINAL M5/M6 RUN — update after M5/M6 Gate]` | Final combined end-to-end and full-repo verification pending M5 completion. |
+| **M5** (iPadOS Safari / WebKit UI & Responsive Matrix) | **Rotation verification open** | `7298239` adds responsive navigation, safe areas, keyboard avoidance, and touch controls. The follow-up guards the editor and sign-in form until their input handlers are ready. All 87 focused Node tests passed. WebKit confirmed the sidebar, touch side conversations, keyboard clearance with a staged drawing, 320 px Split View, draft retention while collapsing the answer dock, and 44 × 44 CSS px touch targets for the primary chat and expanded question controls at 820 × 1180. |
+| **Combined `M-E2E-3` & M6** (Integration verification in Docker) | **Acceptance open** | The production build, standalone package, isolated boot smoke, lint, and payload checks passed. The 15 WebKit harness self-checks passed. Of the 152 application scenarios, 97 passed, 39 failed with errors, and 16 timed out. Focused reruns passed 22 distinct cases that failed in the full run. |
+
+The 2026-11-20 acceptance work used Node 26.13.1 for the application and Node 20.16.0 for Playwright in the existing WebKit image. Source and synthetic profiles were copied to disposable Linux paths. The Windows installation and learning profile were outside the test mounts. The application scenarios use the isolated provider and account supplied by the harness.
+
+- The full repository suite reported 5,413 passed, 2 failed, and 4 skipped out of 5,419. The focused rerun passed all 15 tests covering both failures. It used the corrected server-rendered draft assertion and ran the SDK compiler check without the parallel repository suite.
+- The Drawing Pad suite passed all 73 tests. The production build also completed its TypeScript check, and the packaged server passed the isolated boot and provider runtime checks.
+- The four-worker application run overlapped with the repository suite. Failures included server readiness and browser timeouts, ambiguous UI selectors, and outdated CLI arguments. Focused reruns verified the corrected migration fixtures and flags, oversized PNG handling, Drawing Pad controls, catalog refresh, the touch target audit, and state persistence after a clean SIGTERM and restart.
+- Release acceptance still requires a reliable rotation and Split View result with an active draft, a passing check for forwarded protocol handling when proxy trust is disabled, and a clean application run against the corrected test suite.
+- The rotation scenario (`T1-F11-04`) stalled during viewport changes in Docker WebKit after a drawing and question draft were created. In a standalone rerun with one worker and no other active test cases, the landscape resize took 46 seconds and the subsequent browser check timed out. The same viewport changes succeeded in a minimal editable HTML page. Draft retention through that viewport sequence remains unverified on the app and on physical iPadOS Safari.
+- The disabled-trust scenario (`T2-F3-02`) returned a `Secure` session cookie on the direct HTTP test connection. Next.js 16.4.3 builds its initial request URL using the forwarded protocol before LearnHarness receives the request. This is an open deployment verification issue.
 
 ---
 

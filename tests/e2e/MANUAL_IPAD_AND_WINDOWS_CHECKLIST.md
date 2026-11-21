@@ -1,20 +1,20 @@
 # Manual Acceptance Checklist — Real iPadOS Hardware, Isolated Windows VM & Live LXC Deployment
 
-This document explicitly separates **what is already covered automatically in Docker WebKit (`tests/e2e/`)** from **what requires physical iPadOS hardware, an isolated Windows VM, or the user's real LXC + ChatGPT Plus account**.
+Use this checklist for acceptance on physical iPadOS hardware, in an isolated Windows VM, and with the live LXC and ChatGPT Plus account. See the [developer handover](../../docs/developer-handover.md#42-milestone-verification-status) for Docker run results.
 
 > **Strict Isolation Rule:** Never run development builds, test installers, auto-updater probes, or synthetic migration tests against the productive Windows laptop or its user data directory. Windows desktop/installer checks must run **only** inside a disposable Windows VM with no access to the productive profile. Do not include personal learning materials, real emails, or host user paths in any test or checklist run.
 
 ---
 
-## Automated Docker WebKit Coverage vs. Manual Acceptance Scope
+## Docker Test Scenarios and Manual Acceptance
 
-| Capability Area | Automated in Docker (`tests/e2e/`) | Requires Manual Hardware / Isolated VM / Live Account |
+| Capability | Docker test scenario | Manual check on hardware, in a VM, or with the live account |
 |---|---|---|
-| Viewport layout, overflow, touch targets (`>=44x44` CSS px), `visualViewport` shrink simulation | **Covered** (`Tier 1–4` in WebKit 18 across all 8 iPad presets + `320x1024` + `1440x900`) | Real iPadOS Safari dynamic toolbar collapse, physical onscreen/hardware keyboard height & safe-area notch/home-indicator insets |
-| Drawing Pad pointer parity (`mouse`/`touch`/`pen`), Karoraster, colors/widths, Light paper in Dark app, export contrast | **Covered** (synthetic `PointerEvent`s + PNG pixel contrast verification) | Real Apple Pencil palm rejection, tilt/pressure feel, iPadOS Scribble/zoom gesture interference |
-| Clipboard image/text paste & file inputs | **Covered** (`ClipboardEvent("paste")` + `setInputFiles` + SHA-256 `/api/attachments`) | Real Windows `Win+Shift+S` OS clipboard + `Ctrl+V`; real iPadOS Photos/Camera/Files system sheets |
-| Electron remote config, preload isolation & reconnect/setup UI | **Covered** (`electron-harness.mjs` under Node 26 + WebKit HTML checks) | Real NSIS Windows installer, OS window frame/tray/zoom shortcuts, live auto-updater against test feed |
-| Auth gate, proxy headers, headless OAuth PKCE & migration idempotency | **Covered** (`mock-provider.mjs`, `ServerController`, synthetic fixture profile) | Live Proxmox Linux LXC `systemd` service, real Cloudflare Tunnel HTTPS, real ChatGPT Plus login, real profile export/import |
+| Viewport layout, overflow, touch targets (`>=44x44` CSS px), `visualViewport` shrink simulation | (`Tier 1–4` in WebKit 18 across all 8 iPad presets + `320x1024` + `1440x900`) | Real iPadOS Safari dynamic toolbar collapse, physical onscreen/hardware keyboard height & safe-area notch/home-indicator insets |
+| Drawing Pad pointer parity (`mouse`/`touch`/`pen`), Karoraster, colors/widths, Light paper in Dark app, export contrast | (synthetic `PointerEvent`s + PNG pixel contrast verification) | Real Apple Pencil palm rejection, tilt/pressure feel, iPadOS Scribble/zoom gesture interference |
+| Clipboard image/text paste & file inputs | (`ClipboardEvent("paste")` + `setInputFiles` + SHA-256 `/api/attachments`) | Real Windows `Win+Shift+S` OS clipboard + `Ctrl+V`; real iPadOS Photos/Camera/Files system sheets |
+| Electron remote config, preload isolation & reconnect/setup UI | (`electron-harness.mjs` under Node 26 + WebKit HTML checks) | Real NSIS Windows installer, OS window frame/tray/zoom shortcuts, live auto-updater against test feed |
+| Auth gate, proxy headers, headless OAuth PKCE & migration idempotency | (`mock-provider.mjs`, `ServerController`, synthetic fixture profile) | Live Proxmox Linux LXC `systemd` service, real Cloudflare Tunnel HTTPS, real ChatGPT Plus login, real profile export/import |
 
 ---
 

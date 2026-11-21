@@ -336,6 +336,7 @@ This produces `dist\LearnHarness-<version>-x64-setup.exe`.
 ### 7.2 iPadOS Safari workflow
 
 1. Open `https://learn.example.com` in **iPadOS Safari** and sign in on `/login` (you can optionally tap **Share → Add to Home Screen**).
+   - In a narrow window, tap **Open sidebar** to show the sessions over the current page. Close it with **Close sidebar** or tap the backdrop.
 2. **Seamless live-stream handoff between Windows and iPad:**
    - Start a prompt or answer on Windows, close your laptop lid, and open the same session URL (`/chat/<id>`) on your iPad.
    - The server executes turns independently of any single browser connection (`runPiTurn` + `GET /api/chats/[id]/stream`), so your iPad immediately displays prior messages, replays the in-flight turn log, and streams the rest of the response without starting a second model run.
@@ -347,4 +348,6 @@ This produces `dist\LearnHarness-<version>-x64-setup.exe`.
    - Enable **Drawing Pad** once in **Settings → Core plugins**.
    - Tap **Draw** in the session top bar to open the full-screen canvas with Apple Pencil / touch / mouse support, optional **Grid** (`Karoraster`), **Undo** / **Redo**, **Pen** / **Eraser** / **Hand** / **Clear**, six ink color swatches, **Stroke width** slider (`2`–`16` px), and collapsible **Question** reference bar.
    - Use **Light** / **Dark** / **App** paper theme buttons independently of your app theme (e.g., **Light** paper while the app is in **Dark** mode); monochrome strokes automatically adapt so exported PNGs remain crisp and legible.
-   - Incomplete drawings are saved locally per question in `localStorage`. Tap **Add to answer** to stage the drawing as an attachment preview, then submit your answer normally so it appears in the transcript on both iPad and Windows.
+   - Incomplete drawings are saved in Safari on that device, per session and question. Tap **Add to answer** to stage the drawing as an attachment preview, then submit your answer so the image appears in the shared transcript on both iPad and Windows.
+
+See the [Docker verification results](developer-handover.md#42-milestone-verification-status) and the [manual acceptance checklist](../tests/e2e/MANUAL_IPAD_AND_WINDOWS_CHECKLIST.md) before cutover. Use the checklist on a real iPad to verify Safari's keyboard, safe areas, native pickers, and Apple Pencil, and on your LXC to verify HTTPS, sign-in, and migration.

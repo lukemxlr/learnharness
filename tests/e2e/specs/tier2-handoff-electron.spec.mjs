@@ -11,6 +11,7 @@ import {
 import { resolveRepoDir, ServerController } from "../harness/server-controller.mjs";
 import {
 	bootStack,
+	composerInput,
 	createChatSession,
 	loginApi,
 	loginBrowser,
@@ -32,7 +33,7 @@ test.describe("Tier 2 — F7: Multi-Device Stream Handoff & Edge Recovery", () =
 			await loginBrowser(pageA, stack.baseUrl);
 			await pageA.goto(`${stack.baseUrl}/chat/${chat.id}`, { waitUntil: "domcontentloaded" });
 
-			const composer = pageA.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(pageA);
 			await composer.fill("[STREAM_LONG] client A disconnects early");
 			await pageA.getByRole("button", { name: "Send" }).click();
 
@@ -84,7 +85,7 @@ test.describe("Tier 2 — F7: Multi-Device Stream Handoff & Edge Recovery", () =
 				return route.continue();
 			});
 
-			const composer = page.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(page);
 			await composer.fill("[STREAM_LONG] settled race check");
 			await page.getByRole("button", { name: "Send" }).click();
 
@@ -133,7 +134,7 @@ test.describe("Tier 2 — F7: Multi-Device Stream Handoff & Edge Recovery", () =
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`, { waitUntil: "domcontentloaded" });
 
-			const composer = page.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(page);
 			await composer.fill("[STREAM_LONG] reload reattach");
 			await page.getByRole("button", { name: "Send" }).click();
 
@@ -172,7 +173,7 @@ test.describe("Tier 2 — F7: Multi-Device Stream Handoff & Edge Recovery", () =
 				ipadLandPage.goto(`${stack.baseUrl}/chat/${chat.id}`, { waitUntil: "domcontentloaded" }),
 			]);
 
-			const composer = deskPage.getByTestId("composer").locator("[data-file-path-input]");
+			const composer = composerInput(deskPage);
 			await composer.fill("[STREAM_LONG] three-client handoff");
 			await deskPage.getByRole("button", { name: "Send" }).click();
 

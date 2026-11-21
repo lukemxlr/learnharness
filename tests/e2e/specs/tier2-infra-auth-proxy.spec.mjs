@@ -6,13 +6,14 @@ import { expect, test } from "@playwright/test";
 import { resolveRepoDir, ServerController } from "../harness/server-controller.mjs";
 import {
 	bootStack,
+	composerInput,
 	createChatSession,
 	DEFAULT_USER,
 	loginApi,
 	loginBrowser,
 	syntheticFixtureDir,
 } from "../helpers/e2e-session.mjs";
-import { createVectorDiagramPng } from "../helpers/test-assets.mjs";
+import { buildPng, createVectorDiagramPng } from "../helpers/test-assets.mjs";
 
 function rawHttpRequest({ host = "127.0.0.1", port, method = "GET", reqPath = "/", headers = {}, body }) {
 	return new Promise((resolve, reject) => {
@@ -53,9 +54,8 @@ test.describe("Tier 2 — F1: Attachment Validation, Path Traversal & Security H
 		const stack = await bootStack();
 		try {
 			const { cookie } = await loginApi(stack.baseUrl);
-			const oversized = Buffer.alloc(21 * 1024 * 1024, 0);
-			// PNG magic header so format detection identifies it as PNG before size enforcement
-			Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(oversized, 0);
+			const oversized = buildPng({ width: 2800, height: 2000, compressionLevel: 0 });
+			expect(oversized.length).toBeGreaterThan(20 * 1024 * 1024);
 
 			const form = new FormData();
 			form.append("file", new Blob([oversized], { type: "image/png" }), "oversized.png");
@@ -244,7 +244,7 @@ test.describe("Tier 2 — F2: Mock Provider Faults, Isolation & Concurrency", ()
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`, { waitUntil: "domcontentloaded" });
 
 			await stack.mock.admin({ failNextTurn: 429 });
-			const input = page.getByTestId("composer").locator("[data-file-path-input]");
+			const input = composerInput(page);
 			await input.fill("Trigger injected 429 error");
 			await page.getByRole("button", { name: "Send" }).click();
 
@@ -285,7 +285,7 @@ test.describe("Tier 2 — F2: Mock Provider Faults, Isolation & Concurrency", ()
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`, { waitUntil: "domcontentloaded" });
 
 			await stack.mock.admin({ failNextTurn: { midStreamAbort: true } });
-			const input = page.getByTestId("composer").locator("[data-file-path-input]");
+			const input = composerInput(page);
 			await input.fill("Trigger mid-stream socket reset");
 			await page.getByRole("button", { name: "Send" }).click();
 

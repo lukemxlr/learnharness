@@ -20,6 +20,7 @@ import {
 } from "../helpers/drawing-pad.mjs";
 import {
 	bootStack,
+	composerInput,
 	createChatSession,
 	loginApi,
 	loginBrowser,
@@ -168,7 +169,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			await loginBrowser(ipadPage, stack.baseUrl);
 
 			await deskPage.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await deskPage.getByTestId("composer").locator("[data-file-path-input]").fill("[STREAM_LONG] gated handoff");
+			await composerInput(deskPage).fill("[STREAM_LONG] gated handoff");
 			await deskPage.getByRole("button", { name: "Send" }).click();
 			await expect(deskPage.getByText("Chunk 01/25:")).toBeVisible({ timeout: 10_000 });
 
@@ -216,7 +217,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			await page.getByTestId("model-menu").getByText("gpt-test-7-pro").first().click();
 
 			await stack.mock.clearRequests();
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("Explain momentum conservation");
+			await composerInput(page).fill("Explain momentum conservation");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByText(/Synthetic tutor response/i)).toBeVisible({ timeout: 15_000 });
 
@@ -242,7 +243,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/chat_synth_teach_01`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[STREAM_LONG] active turn");
+			await composerInput(page).fill("[STREAM_LONG] active turn");
 			await page.getByRole("button", { name: "Send" }).click();
 			await expect(page.getByText("Chunk 01/25:")).toBeVisible({ timeout: 10_000 });
 
@@ -290,7 +291,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			expect(exp.code).toBe(0);
 			const imp = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				stack.ctrl.dataDir,
@@ -330,7 +331,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			expect(exp.code).toBe(0);
 			const imp = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				stack.ctrl.dataDir,
@@ -370,7 +371,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			expect(exp.code).toBe(0);
 			const imp = await stack.ctrl.runMigrateCli([
 				"import",
-				"--source",
+				"--bundle",
 				bundleDir,
 				"--target",
 				stack.ctrl.dataDir,
@@ -406,7 +407,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 				buffer: png,
 			});
 			await expect(page.getByText(/new-diagram\.png/i)).toBeVisible();
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[ECHO_VISION] post-migration");
+			await composerInput(page).fill("[ECHO_VISION] post-migration");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			await expect(page.getByText(new RegExp(`sha256=${shaPrefix}`))).toBeVisible({ timeout: 15_000 });
@@ -436,7 +437,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			await loginBrowser(ipadPage, stack.baseUrl);
 
 			await deskPage.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await deskPage.getByTestId("composer").locator("[data-file-path-input]").fill("[STREAM_LONG] electron handoff");
+			await composerInput(deskPage).fill("[STREAM_LONG] electron handoff");
 			await deskPage.getByRole("button", { name: "Send" }).click();
 			await expect(deskPage.getByText("Chunk 01/25:")).toBeVisible({ timeout: 10_000 });
 
@@ -512,7 +513,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(page).fill("[TRIGGER_FREE]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const dock = page.getByTestId("question-dock");
@@ -551,7 +552,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 
 			await loginBrowser(page, stack.baseUrl);
 			await page.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_MC]");
+			await composerInput(page).fill("[TRIGGER_MC]");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			const dock = page.getByTestId("question-dock");
@@ -627,7 +628,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			await loginBrowser(ipadPage, stack.baseUrl);
 
 			await deskPage.goto(`${stack.baseUrl}/chat/${chat.id}`);
-			await deskPage.getByTestId("composer").locator("[data-file-path-input]").fill("[TRIGGER_FREE]");
+			await composerInput(deskPage).fill("[TRIGGER_FREE]");
 			await deskPage.getByRole("button", { name: "Send" }).click();
 			await expect(deskPage.getByTestId("question-dock")).toBeVisible({ timeout: 15_000 });
 
@@ -682,7 +683,7 @@ test.describe("Tier 3 — Cross-Feature Pairwise Integrations", () => {
 			});
 			await expect(page.getByText(/sample-3page\.pdf/i)).toBeVisible();
 
-			await page.getByTestId("composer").locator("[data-file-path-input]").fill("Read page 2 equation");
+			await composerInput(page).fill("Read page 2 equation");
 			await page.getByRole("button", { name: "Send" }).click();
 
 			await expect(page.getByText(/Synthetic tutor response/i)).toBeVisible({ timeout: 15_000 });

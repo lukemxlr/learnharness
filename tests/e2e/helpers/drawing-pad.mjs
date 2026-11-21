@@ -150,7 +150,7 @@ export async function assertExportedDrawingContrast(page, baseUrl, imgLocator, c
 }
 
 async function drawingPadSurfaceOrPage(page) {
-	const surface = page.locator("[data-plugin-session-surface]").first();
+	const surface = page.locator("[data-plugin-session-surface-frame]").filter({ has: drawingCanvas(page) }).first();
 	if (await surface.isVisible().catch(() => false)) {
 		return surface;
 	}

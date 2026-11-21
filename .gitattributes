@@ -1,0 +1,2 @@
+/scripts/docker-test.sh text eol=lf
+/tests/e2e/run-docker-e2e.sh text eol=lf
