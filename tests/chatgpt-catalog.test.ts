@@ -51,15 +51,27 @@ test("account/full and catalog authority changes reject outstanding old leases w
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 2, authorityRevision: 3, revision: 8 }, status: status("B"), invalidate: "none" });
  assert.equal(chatGPTModels().length, 0); await assert.rejects(chatGPTLease(newScope, false));
 });
-test("account-offered GPT-6.1 Terra resolves from the bundled Responses catalog", async () => {
+test("account-offered GPT-6.1 Terra resolves from the bundled Responses catalog while unbundled slugs synthesize defaults", async () => {
  const refresh = refreshConnectionCatalog("chatgpt");
  reply(pending.at(-1), { ...value("B", 9, "B", 3), models: [
   { id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)" },
-  { id: "not-in-the-bundled-catalog", name: "Unsupported" },
+  { id: "not-in-the-bundled-catalog", name: "Dynamic Model" },
  ] });
  await refresh;
- assert.deepEqual(chatGPTModels().map(({ provider, id, name, api, cost }) => ({ provider, id, name, api, cost })), [{
-  provider: "chatgpt", id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)", api: "openai-responses",
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
- }]);
+ const terraBundled = piModels().getModels("openai").find((m) => m.id === "gpt-6.1-terra" && m.api === "openai-responses")!;
+ const models = chatGPTModels();
+ assert.deepEqual(models.map(({ provider, id, name, api, cost }) => ({ provider, id, name, api, cost })), [
+  {
+   provider: "chatgpt", id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)", api: "openai-responses",
+   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  {
+   provider: "chatgpt", id: "not-in-the-bundled-catalog", name: "Dynamic Model", api: "openai-responses",
+   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+ ]);
+ assert.equal(models[0]?.contextWindow, terraBundled.contextWindow);
+ assert.equal(models[0]?.maxTokens, terraBundled.maxTokens);
+ assert.equal(models[1]?.contextWindow, 128_000);
+ assert.equal(models[1]?.maxTokens, 16_384);
 });

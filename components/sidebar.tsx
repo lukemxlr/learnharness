@@ -422,7 +422,7 @@ export function SessionRow({
 				data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 				data-session-id={chat.id}
 				className={cn(
-					"relative flex w-full items-center gap-2 pr-3 text-left transition-colors hover:bg-accent",
+					"relative flex w-full items-center gap-2 pr-3 text-left hover:bg-accent",
 					compact ? SIDEBAR_COMPACT_ROW : "min-h-11 py-2",
 					active && "bg-accent",
 					kbdSelected && !active && "bg-accent/60 ring-1 ring-inset ring-border",
@@ -436,7 +436,7 @@ export function SessionRow({
 	return (
 		<div
 			className={cn(
-				"group/row relative flex w-full items-center transition-colors hover:bg-accent",
+				"group/row relative flex w-full items-center hover:bg-accent",
 				active && "bg-accent",
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-inset ring-border",
 			)}
