@@ -1,3 +1,16 @@
+function randomId(): string {
+  const c = globalThis.crypto;
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (c && typeof c.getRandomValues === "function") c.getRandomValues(bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  let hex = "";
+  for (let i = 0; i < 16; i++) hex += bytes[i]!.toString(16).padStart(2, "0");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** A tucked text-only control, matching the native quiz's Why button. */
 export function mountDisclosure(container: HTMLElement, kind: "test-output" | "model-solution", label: string, signal: AbortSignal, render: (body: HTMLElement) => void | (() => void)): () => void {
   const document = container.ownerDocument;
@@ -9,7 +22,7 @@ export function mountDisclosure(container: HTMLElement, kind: "test-output" | "m
   button.setAttribute("aria-expanded", "false");
   const body = document.createElement("div");
   body.className = "lh-coding-disclosure__body";
-  body.id = `lh-coding-${crypto.randomUUID()}`;
+  body.id = `lh-coding-${randomId()}`;
   button.setAttribute("aria-controls", body.id);
   root.append(button);
   container.append(root);

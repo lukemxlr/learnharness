@@ -25,6 +25,7 @@ import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai"
 import type { ChatRecord, SideChatAnchor, SideChatMessage, SideChatThread } from "./contracts/chat.ts";
 import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
 import type { LhViewMessage, LhViewPart } from "./view.ts";
+import { randomUuid } from "./uuid.ts";
 import {
 	activeProblemOf,
 	failedOutputCallIds,
@@ -303,7 +304,7 @@ export function parseSideOpenInput(raw: unknown): boolean {
 // ─── threads ─────────────────────────────────────────────────────────────────
 
 export function newSideThreadId(): string {
-	return `side_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+	return `side_${Date.now().toString(36)}_${randomUuid().slice(0, 8)}`;
 }
 
 export function newSideThread(anchor: SideChatAnchor, at = new Date().toISOString()): SideChatThread {

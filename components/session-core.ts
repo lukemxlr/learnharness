@@ -976,21 +976,27 @@ export class SessionModel {
 		// write-ahead will persist (inputAppends), with LOCAL ids so
 		// adoption can tell them from the record's absorbed copies.
 		const optimistic: LhMessage[] = [];
-		if (input.type === "text") optimistic.push({ ...newUserMessage(input.text, input.images, input.attachments), id: localId() });
-		else if (input.type === "thinking") {
-			// The practice submissions (2026-10-04): the marker lands
-			// optimistically — the card renders from its details the
-			// moment the button fires.
-			optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text, input.images, input.attachments), id: localId() });
-		} else if (input.type === "next") {
-			// The move-on signal (owner round 16): the NEXT PROBLEM line
-			// renders the instant the chip/Enter fires.
-			optimistic.push({ ...newNextMessage(), id: localId() });
-		} else if (input.type === "answer") {
-			const tool = pendingCallTool(this.nativeHistory(), input.toolCallId) ?? "quiz";
-			const result = { ...newAnswerResult(input.toolCallId, tool, input.answer), id: localId() };
-			optimistic.push(result);
-			this.unconfirmedAnswers.set(result.id, expectedKey ?? input.toolCallId);
+		try {
+			if (input.type === "text") optimistic.push({ ...newUserMessage(input.text, input.images, input.attachments), id: localId() });
+			else if (input.type === "thinking") {
+				// The practice submissions (2026-10-04): the marker lands
+				// optimistically — the card renders from its details the
+				// moment the button fires.
+				optimistic.push({ ...newThinkingMessage(input.problemCallId, input.text, input.images, input.attachments), id: localId() });
+			} else if (input.type === "next") {
+				// The move-on signal (owner round 16): the NEXT PROBLEM line
+				// renders the instant the chip/Enter fires.
+				optimistic.push({ ...newNextMessage(), id: localId() });
+			} else if (input.type === "answer") {
+				const tool = pendingCallTool(this.nativeHistory(), input.toolCallId) ?? "quiz";
+				const result = { ...newAnswerResult(input.toolCallId, tool, input.answer), id: localId() };
+				optimistic.push(result);
+				this.unconfirmedAnswers.set(result.id, expectedKey ?? input.toolCallId);
+			}
+		} catch (err) {
+			this.setError(err instanceof Error ? err.message : String(err));
+			this.setStatus("error");
+			return refused();
 		}
 		if (optimistic.length > 0) this.mutate(() => {
 			this.tail = [...this.tail, ...optimistic];

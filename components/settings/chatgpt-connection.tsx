@@ -410,7 +410,24 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 										size="xs"
 										data-testid="chatgpt-headless-copy"
 										onClick={() => {
-											void navigator.clipboard?.writeText(headlessStart.authorizeUrl).then(() => setHeadlessCopied(true)).catch(() => {});
+											const text = headlessStart.authorizeUrl;
+											if (navigator.clipboard?.writeText) {
+												void navigator.clipboard.writeText(text).then(() => setHeadlessCopied(true)).catch(() => {});
+												return;
+											}
+											try {
+												const ta = document.createElement("textarea");
+												ta.value = text;
+												ta.setAttribute("readonly", "");
+												ta.style.position = "fixed";
+												ta.style.opacity = "0";
+												document.body.appendChild(ta);
+												ta.select();
+												if (document.execCommand("copy")) setHeadlessCopied(true);
+												ta.remove();
+											} catch {
+												/* ignore */
+											}
 										}}
 									>
 										{headlessCopied ? "Copied" : "Copy link"}

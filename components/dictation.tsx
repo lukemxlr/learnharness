@@ -111,6 +111,7 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * it and deep-links Settings → Keys → the Deepgram row. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
 export const DICTATION_ACTIVE_ELSEWHERE = "Dictation is active elsewhere";
+export const DICTATION_INSECURE_CONTEXT = "Dictation requires HTTPS";
 
 // Mounted controllers do not claim capture. Only start() acquires the single
 // window-wide owner, synchronously, before settings/mic/token awaits.
@@ -560,19 +561,31 @@ export function useDictation({ append, destination = "primary", disabled = false
 		}
 		if (gen !== genRef.current) return;
 
+		// Browsers hide navigator.mediaDevices on plain HTTP LAN origins
+		// (non-localhost where window.isSecureContext is false). Surface a
+		// clear message instead of throwing an uncaught TypeError.
+		const getUserMedia =
+			typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getUserMedia === "function"
+				? navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+				: null;
+		if (!getUserMedia) {
+			setError(typeof window !== "undefined" && window.isSecureContext === false ? DICTATION_INSECURE_CONTEXT : "Microphone unavailable");
+			cleanup();
+			return;
+		}
+
 		// Mitigation D: the warm token (pre-minted at mount / after the last
 		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
 		// mic is the long pole (macOS HAL + APM init) and gates everything —
-		// the token runs concurrently with it. 127.0.0.1 is a secure
-		// context, so getUserMedia works without TLS; macOS TCC prompts on
-		// first use.
+		// the token runs concurrently with it. 127.0.0.1 and HTTPS are secure
+		// contexts, so getUserMedia works there; browsers prompt on first use.
 		const tokenPromise = warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
-		const micPromise = navigator.mediaDevices.getUserMedia({
-			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-		});
 		let stream: MediaStream;
 		try {
+			const micPromise = getUserMedia({
+				audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+			});
 			stream = await micPromise;
 			if (gen !== genRef.current) {
 				for (const track of stream.getTracks()) track.stop();
