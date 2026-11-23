@@ -2,10 +2,16 @@
 
 This document tracks the implemented features and verification results for the self-hosted server, iPadOS Safari + Apple Pencil, unified attachments, and remote desktop fork of LearnHarness (based on upstream `v0.7.0`).
 
-## Current status (`v0.7.2`)
+## Current status (`v0.7.3`)
 
-All implementation milestones, upstream `v0.7.0` integration, `v0.7.1` LAN-HTTP & iPadOS enhancements, `v0.7.2` Local/Remote onboarding + Cloudflare Access + in-app Backups/Restore/1-click Migration + sidebar Knowledge Graph + new-session image paste, and automated Linux Docker verification suites pass on `main`:
+All implementation milestones, upstream `v0.7.0` integration, `v0.7.1`–`v0.7.3` self-hosted server, Desktop remote/Cloudflare Access, backup/migration, and iPadOS UX fixes pass full automated Docker verification (`typecheck`, `lint`, full 5,650+ test suite, standalone server smoke, and Playwright WebKit E2E):
 
+- **`v0.7.3` Stability, Cloudflare Access, iPadOS UX & Server Updater Polish:**
+  - Switched Electron Cloudflare Access health probing from `net.fetch` (which threw `Redirect was cancelled` on `redirect: "manual"`) to `electron.net.request` redirect interception, flushed session cookies on `did-navigate`, hardened case-insensitive header parsing, and removed `redirect: "manual"` from `local-migrate.cjs`.
+  - Split **Desktop app** and **Server** version display in Settings → General, displayed the connected server URL subtly under **Server connection**, added on-demand server release checks (`GET /api/version/latest`), and wired the remote-mode **Automatic updates** toggle directly into `remote-config.json`.
+  - Added `scripts/update-server.sh` (1-command atomic Linux server upgrade with `/api/health` verification and automatic rollback).
+  - Re-enabled unsigned macOS Apple Silicon `.dmg` packaging on `macos-26` (`8` verified draft assets, manual `.dmg` updates with auto-updater cleanly disabled on unsigned `darwin` bundles to avoid `latest-mac.yml` 404s).
+  - Fixed iPadOS WebKit soft-keyboard dock collapse (`components/dock-height.ts` coordinate-invariant `visualViewport` intersection), eliminated stale `dockReserve` dead space after keyboard close (`components/chat.tsx`), added 2-finger pinch-zoom + simultaneous pan to `PlanPopup` and `MermaidOverlay` (`components/pan-zoom.ts`, `components/plan-block.tsx`, `components/session-overlay.tsx`), and shipped iPadOS PWA `apple-icon.png`, `icon-192.png`/`icon-512.png`, and `app/manifest.ts` (`LearnHarness`).
 - **`v0.7.2` Onboarding, Cloudflare Access, Backups & UX Upgrades:**
   - Equal side-by-side Desktop first-run choice (**Run locally** with migration callout vs **Connect to a server** with setup docs link) and Settings → General mode switching (`electron/setup.html`, `electron/main.cjs`, `components/settings/settings-dialog.tsx`).
   - Built-in **Cloudflare Access** modal authentication & mid-session expiry recovery in Electron using `net.fetch` and an isolated modal `BrowserWindow` (`electron/remote-config.cjs`, `electron/main.cjs`).

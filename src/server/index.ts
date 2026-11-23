@@ -70,4 +70,5 @@ export * from "./attachments.ts";
 export * from "./attachment-delivery.ts";
 export * from "./user-auth.ts";
 export * from "./backups.ts";
+export * from "./version-check.ts";
 export { isHttpsRequest, effectiveRequestHost, effectiveRequestProto } from "./desktop-access.ts";

@@ -69,16 +69,15 @@ LearnHarness uses AI agents to plan and teach lessons from your current understa
 
 ## Quick start
 
-### 1. Desktop App (Windows &amp; Linux)
+### 1. Desktop App (macOS, Windows &amp; Linux)
 
 Download the latest release from **[GitHub Releases](https://github.com/lukemxlr/learnharness/releases)**:
 
-- **Windows (x64):** `LearnHarness-<version>-x64-setup.exe` (unsigned per-user NSIS installer; Windows SmartScreen may show an "unknown publisher" prompt).
-- **Linux (x64):** `LearnHarness-<version>-x86_64.AppImage` or `LearnHarness-<version>-amd64.deb`.
+- **macOS (Apple Silicon / arm64):** `LearnHarness-<version>-arm64.dmg` (unsigned DMG — drag to **Applications**, then once run `xattr -cr /Applications/LearnHarness.app` in Terminal to clear the macOS Gatekeeper quarantine flag; updates install manually via the latest `.dmg` because Squirrel.Mac requires an Apple Developer signature).
+- **Windows (x64):** `LearnHarness-<version>-x64-setup.exe` (unsigned per-user NSIS installer; Windows SmartScreen may show an "unknown publisher" prompt; supports automatic in-app updates).
+- **Linux (x64):** `LearnHarness-<version>-x86_64.AppImage` or `LearnHarness-<version>-amd64.deb` (both support automatic in-app updates).
 
-On first launch, choose **Run locally** on your computer or **Connect to a server** (enter `https://learn.example.com`, your Tailscale HTTPS URL, or a LAN `http://<server-ip>:3000` address). You can switch between local and remote modes anytime via **Settings → General** or `Ctrl+Alt+S`.
-
-> **macOS note:** Automated releases in this fork publish Windows x64, Linux x64, and the Linux server bundle (no unsigned macOS release installers are published). macOS users can run in any browser against the self-hosted server or build locally from source.
+On first launch, choose **Run locally** on your computer or **Connect to a server** (enter `https://learn.example.com`, your Tailscale HTTPS URL, or a LAN `http://<server-ip>:3000` address). You can switch between local and remote modes anytime via **Settings → General** or `Ctrl+Alt+S` / `Cmd+Option+S`.
 
 ### 2. Self-Hosted Linux / Proxmox LXC Server
 

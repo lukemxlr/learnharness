@@ -19,8 +19,14 @@ const ui = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains" });
 const prose = Source_Sans_3({ subsets: ["latin"], variable: "--font-sans3" });
 
 export const metadata: Metadata = {
-	title: "Learning Harness",
+	title: "LearnHarness",
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
+	applicationName: "LearnHarness",
+	appleWebApp: {
+		capable: true,
+		title: "LearnHarness",
+		statusBarStyle: "black-translucent",
+	},
 };
 
 export const viewport: Viewport = {
@@ -30,6 +36,10 @@ export const viewport: Viewport = {
 	// orientation and Split-View resizes while keeping pinch-zoom unrestricted.
 	minimumScale: 1,
 	viewportFit: "cover",
+	themeColor: [
+		{ media: "(prefers-color-scheme: dark)", color: "#141414" },
+		{ media: "(prefers-color-scheme: light)", color: "#fafafa" },
+	],
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

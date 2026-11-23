@@ -81,9 +81,10 @@ export type DraftSelection =
 	| { ok: true; release: ReleaseRecord; warnings: string[] }
 	| Failures;
 
-/** The full expected asset inventory for one version (7 files). */
+/** The full expected asset inventory for one version (8 files). */
 export type ExpectedAssets = {
 	version: string;
+	mac: { dmg: string };
 	win: { exe: string; feed: string };
 	linux: { appImage: string; deb: string; feed: string };
 	server: { tarball: string };
@@ -110,8 +111,11 @@ export function checkVersion(version: unknown): { ok: true; version: string } | 
 	return { ok: true, version };
 }
 
-/** The exact asset set the installed builder + Linux server step emit for this repo's config. */
+/** The exact asset set the installed builder + macOS DMG + Linux server steps emit for this repo's config. */
 export function expectedAssets(version: string): ExpectedAssets {
+	const mac = {
+		dmg: `${PRODUCT_NAME}-${version}-arm64.dmg`,
+	};
 	const win = {
 		exe: `${PRODUCT_NAME}-${version}-x64-setup.exe`,
 		feed: "latest.yml",
@@ -125,14 +129,15 @@ export function expectedAssets(version: string): ExpectedAssets {
 		tarball: `${PRODUCT_NAME}-${version}-server-linux-x64.tar.gz`,
 	};
 	// Sidecar differential-update blockmap: emitted for NSIS exe (createBlockmap);
-	// AppImage/deb have none in app-builder-lib 26.x.
+	// unsigned macOS DMG (no Squirrel.Mac zip/latest-mac.yml) and AppImage/deb have none.
 	const blockmaps = [win.exe].map((name) => `${name}.blockmap`);
 	return {
 		version,
+		mac,
 		win,
 		linux,
 		server,
-		files: [win.exe, linux.appImage, linux.deb, ...blockmaps, win.feed, linux.feed, server.tarball],
+		files: [mac.dmg, win.exe, linux.appImage, linux.deb, ...blockmaps, win.feed, linux.feed, server.tarball],
 	};
 }
 
@@ -259,6 +264,19 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 	if (config.artifactName != null) bad("a top-level artifactName now overrides target defaults — expected names no longer hold");
 	const sameTargets = (actual: unknown, expected: Array<Record<string, unknown>>) =>
 		JSON.stringify(actual) === JSON.stringify(expected);
+	if (!isPlainObject(config.mac)) bad("mac section missing");
+	else {
+		if (config.mac.artifactName != null) {
+			bad(`mac.artifactName changed (${JSON.stringify(config.mac.artifactName)}) — expected names no longer hold`);
+		}
+		const macTargets = Array.isArray(config.mac.target) ? config.mac.target : [];
+		const hasArm64Dmg = macTargets.some(
+			(t) => isPlainObject(t) && t.target === "dmg" && Array.isArray(t.arch) && t.arch.includes("arm64"),
+		);
+		if (!hasArm64Dmg) {
+			bad(`mac.target missing dmg arm64 (${JSON.stringify(config.mac.target)}) — expected names no longer hold`);
+		}
+	}
 	if (!isPlainObject(config.win)) bad("win section missing");
 	else {
 		if (config.win.artifactName !== "${productName}-${version}-${arch}-setup.${ext}") {

@@ -13,6 +13,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { isCloudflareAccessUrl } = require("./remote-config.cjs");
 
 const MANAGED_TOP_DIRS = new Set([
 	"chats",
@@ -179,12 +180,16 @@ async function migrateLocalDataToServer({ dataDir, userDataDir, serverOrigin, dr
 	}
 
 	// Verify server session first so we fail cleanly if not signed in yet
+	// Note: omit `redirect: "manual"` because Electron's net.fetch throws
+	// "Redirect was cancelled" on manual redirects; check res.url instead.
 	try {
 		const sessRes = await fetchImpl(`${serverOrigin}/api/auth/session`, {
 			method: "GET",
 			headers: { accept: "application/json", origin: serverOrigin },
-			redirect: "manual",
 		});
+		if (typeof sessRes.url === "string" && isCloudflareAccessUrl(sessRes.url)) {
+			return { ok: false, error: "Cloudflare Access session expired. Reload the app to sign in again, then retry migration." };
+		}
 		if (sessRes.status !== 200) {
 			return { ok: false, error: "Please sign in to your server first, then run migration again." };
 		}
@@ -238,9 +243,8 @@ async function migrateLocalDataToServer({ dataDir, userDataDir, serverOrigin, dr
 					method: "POST",
 					headers: { origin: serverOrigin },
 					body: form,
-					redirect: "manual",
 				});
-				if (res.ok) uploadedAttachments++;
+				if (res.ok && !(typeof res.url === "string" && isCloudflareAccessUrl(res.url))) uploadedAttachments++;
 				else skippedAttachments++;
 			} catch {
 				skippedAttachments++;
@@ -263,8 +267,14 @@ async function migrateLocalDataToServer({ dataDir, userDataDir, serverOrigin, dr
 				origin: serverOrigin,
 			},
 			body: JSON.stringify({ files: payloadFiles, mode: "merge", dryRun: Boolean(dryRun) }),
-			redirect: "manual",
 		});
+		if (typeof res.url === "string" && isCloudflareAccessUrl(res.url)) {
+			return {
+				ok: false,
+				localBackupPath,
+				error: "Cloudflare Access session expired during migration. Reload to sign in again, then retry.",
+			};
+		}
 		const body = await res.json().catch(() => null);
 		if (!res.ok) {
 			return {

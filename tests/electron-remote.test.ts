@@ -45,17 +45,17 @@ after(() => {
 describe("electron/remote-config.cjs", () => {
 	it("fails closed on missing/corrupt/invalid config and normalizes valid remote URLs", () => {
 		const dir = mkTempDir("lh-remote-cfg-");
-		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false });
+		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false, autoUpdate: true });
 
 		fs.writeFileSync(path.join(dir, "remote-config.json"), "{bad json", "utf8");
-		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false });
+		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false, autoUpdate: true });
 
 		fs.writeFileSync(
 			path.join(dir, "remote-config.json"),
 			JSON.stringify({ mode: "remote", serverUrl: "javascript:alert(1)" }),
 			"utf8",
 		);
-		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false });
+		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false, autoUpdate: true });
 
 		const saved = remoteConfig.writeRemoteConfig(dir, {
 			mode: "remote",
@@ -290,6 +290,7 @@ describe("electron remote & setup preloads + static HTML CSP", () => {
 			"checkForUpdates",
 			"expandWindow",
 			"getAppVersion",
+			"getAutoUpdate",
 			"getUpdateState",
 			"getZoom",
 			"inspectLocalProfile",
@@ -301,6 +302,7 @@ describe("electron remote & setup preloads + static HTML CSP", () => {
 			"onZoom",
 			"platform",
 			"setAppearance",
+			"setAutoUpdate",
 		]);
 
 		for (const forbidden of [
@@ -759,7 +761,20 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 			});
 			const remoteWinB2 = m.windows.at(-1)!;
 
-			// 8. Gateway 502 on mainFrame triggers reconnect window
+			// 8. Remote-mode auto-update preference persists cleanly in remote-config.json
+			const preAuto = await m.handleMap.get("lh:remote:get-auto-update")!({
+				sender: remoteWinB2.webContents,
+				senderFrame: remoteWinB2.webContents.mainFrame,
+			});
+			assert.equal(preAuto, true);
+			const setFalse = await m.handleMap.get("lh:remote:set-auto-update")!(
+				{ sender: remoteWinB2.webContents, senderFrame: remoteWinB2.webContents.mainFrame },
+				false,
+			);
+			assert.equal(setFalse, false);
+			assert.equal((remoteConfig.readRemoteConfig(userDataDir) as { autoUpdate?: boolean }).autoUpdate, false);
+
+			// 9. Gateway 502 on mainFrame triggers reconnect window
 			await m.runHeadersReceived({
 				url: `${originB}/`,
 				resourceType: "mainFrame",
@@ -770,7 +785,7 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 			await new Promise((r) => setImmediate(r));
 			assert.ok(m.windows.at(-1)!.loadedFile.endsWith("remote-reconnect.html"));
 
-			// 9. Setup window "Don't have a server set up yet?" opens fork setup docs externally
+			// 10. Setup window "Don't have a server set up yet?" opens fork setup docs externally
 			const finalReconnectWin = m.windows.at(-1)!;
 			await m.handleMap.get("lh:setup:open-docs")!({
 				sender: finalReconnectWin.webContents,
@@ -781,7 +796,7 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 				"open-docs must open the fork's server setup guide in the OS browser",
 			);
 
-			// 10. Setup window "Run locally" persists mode=local and relaunches cleanly
+			// 11. Setup window "Run locally" persists mode=local and relaunches cleanly
 			const useLocalRes = await m.handleMap.get("lh:setup:use-local")!({
 				sender: finalReconnectWin.webContents,
 				senderFrame: finalReconnectWin.webContents.mainFrame,
@@ -795,5 +810,167 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 			await new Promise<void>((r) => serverA.close(() => r()));
 			await new Promise<void>((r) => serverB.close(() => r()));
 		}
+	});
+
+	it("uses electron net.request redirect interception for Cloudflare Access (never throwing Redirect was cancelled) and flushes cookies on did-navigate", async () => {
+		const userDataDir = mkTempDir("lh-el-cf-");
+		let authenticated = false;
+		let cookieFlushed = false;
+		const windows: Array<{
+			loadedUrl: string;
+			loadedFile: string;
+			destroyed: boolean;
+			options: { webPreferences: { preload?: string; sandbox: boolean; contextIsolation: boolean } };
+			webContents: EventEmitter & { mainFrame: { url: string }; setWindowOpenHandler: (fn: unknown) => void; getZoomFactor: () => number; send: () => void };
+			close: () => void;
+		}> = [];
+		const handleMap = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
+
+		class FakeWC extends EventEmitter {
+			id = Math.floor(Math.random() * 100000);
+			mainFrame = { url: "" };
+			setWindowOpenHandler() {}
+			getZoomFactor() { return 1; }
+			send() {}
+			getUserAgent() { return "Mozilla/5.0 Chrome/130.0.0.0 Electron/44.0.0 Safari/537.36"; }
+			setUserAgent() {}
+		}
+		class FakeWin extends EventEmitter {
+			static getAllWindows() { return windows.filter((w) => !w.destroyed); }
+			static fromWebContents(wc: unknown) { return windows.find((w) => !w.destroyed && w.webContents === wc); }
+			destroyed = false;
+			loadedUrl = "";
+			loadedFile = "";
+			webContents = new FakeWC();
+			constructor(readonly options: { webPreferences: { preload?: string; sandbox: boolean; contextIsolation: boolean } }) {
+				super();
+				windows.push(this);
+			}
+			loadURL(u: string) {
+				this.loadedUrl = u;
+				this.webContents.mainFrame = { url: u };
+				// Simulate Cloudflare Access Email OTP completing and landing on /api/health
+				if (u.includes(".cloudflareaccess.com/")) {
+					setImmediate(() => {
+						authenticated = true;
+						this.webContents.emit("did-navigate", {}, "https://app.example.test/api/health");
+					});
+				}
+			}
+			loadFile(f: string) { this.loadedFile = f; this.webContents.mainFrame = { url: `file://${f}` }; }
+			show() {}
+			close() { this.destroyed = true; this.emit("closed"); }
+			isDestroyed() { return this.destroyed; }
+			getBounds() { return { x: 0, y: 0, width: 800, height: 600 }; }
+			setBounds() {}
+			setBackgroundColor() {}
+			setTitleBarOverlay() {}
+		}
+
+		const fakeNet = {
+			// Intentionally simulate real Electron net.fetch throwing on redirect: "manual"
+			fetch: async () => {
+				throw new Error("Redirect was cancelled");
+			},
+			request: (opts: { url: string; redirect?: string; useSessionCookies?: boolean }) => {
+				assert.equal(opts.redirect, "manual");
+				assert.equal(opts.useSessionCookies, true);
+				const req = Object.assign(new EventEmitter(), {
+					setHeader() {},
+					abort() {
+						// Real Electron emits error after abort; probe must ignore it once settled
+						setImmediate(() => req.emit("error", new Error("Redirect was cancelled")));
+					},
+					end() {
+						setImmediate(() => {
+							if (!authenticated) {
+								req.emit(
+									"redirect",
+									302,
+									"GET",
+									"https://team.cloudflareaccess.com/cdn-cgi/access/login/app.example.test",
+									{ "WWW-Authenticate": ["Cloudflare-Access"] },
+								);
+								return;
+							}
+							const res = Object.assign(new EventEmitter(), { statusCode: 200, headers: {} });
+							req.emit("response", res);
+							res.emit("data", Buffer.from(JSON.stringify({ ok: true }), "utf8"));
+							res.emit("end");
+						});
+					},
+				});
+				return req;
+			},
+		};
+
+		const app = Object.assign(new EventEmitter(), {
+			name: "LearnHarness",
+			setName() {},
+			getVersion: () => "0.7.3",
+			getPath: () => userDataDir,
+			setPath() {},
+			requestSingleInstanceLock: () => false,
+			quit() {},
+			exit() {},
+			whenReady: async () => {},
+			isPackaged: true,
+		});
+
+		const context = {
+			require: (id: string) => {
+				if (id === "electron") {
+					return {
+						app,
+						BrowserWindow: FakeWin,
+						nativeTheme: { themeSource: "system" },
+						net: fakeNet,
+						Menu: { buildFromTemplate: () => ({ popup() {} }), setApplicationMenu() {} },
+						ipcMain: {
+							handle: (ch: string, fn: (event: unknown, ...args: unknown[]) => unknown) => handleMap.set(ch, fn),
+							on: () => {},
+						},
+						session: {
+							defaultSession: {
+								cookies: {
+									flushStore: async () => { cookieFlushed = true; },
+								},
+								setPermissionRequestHandler: () => {},
+								setPermissionCheckHandler: () => {},
+								webRequest: { onHeadersReceived: () => {} },
+							},
+						},
+						shell: { openExternal: () => {} },
+						dialog: { showOpenDialog: () => {} },
+					};
+				}
+				return mainRequire(id);
+			},
+			process: Object.assign(new EventEmitter(), { platform: "win32", argv: [], env: {} }),
+			__dirname: path.dirname(mainFile),
+			AbortController,
+			URL,
+			Buffer,
+			setImmediate,
+			setTimeout,
+			clearTimeout,
+			console: { log() {}, error() {} },
+		};
+
+		runInNewContext(mainSource, context, { filename: mainFile });
+		await (runInNewContext("main()", context) as Promise<void>);
+
+		const setupWin = windows[0]!;
+		const res = await handleMap.get("lh:setup:save")!(
+			{ sender: setupWin.webContents, senderFrame: setupWin.webContents.mainFrame },
+			"https://app.example.test",
+		);
+		assert.deepEqual(JSON.parse(JSON.stringify(res)), { ok: true, serverUrl: "https://app.example.test" });
+		assert.equal(cookieFlushed, true, "Cloudflare Access sign-in must flush cookies before follow-up health check");
+		const cfModal = windows.find((w) => w.loadedUrl.includes("team.cloudflareaccess.com"));
+		assert.ok(cfModal, "Cloudflare Access modal window must open");
+		assert.equal(cfModal.options.webPreferences.preload, undefined, "Cloudflare modal must have zero preload");
+		assert.equal(cfModal.options.webPreferences.sandbox, true);
+		assert.equal(cfModal.destroyed, true, "Cloudflare modal must close after returning to server origin");
 	});
 });

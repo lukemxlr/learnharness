@@ -154,8 +154,6 @@ const DOCK = "mx-auto w-full max-w-[46rem] px-4";
 // mounted while the question owns the band so widening fades it back.
 const MARGIN_GAP = 16;
 const MARGIN_MIN_W = 220;
-// The dock overlay's gradient band (h-24) — part of the reserved tail.
-const GRADIENT_H = 96;
 // Fold thresholds (owner, scroll round 1, tuned round 3): pixel distance
 // from the bottom — position, not velocity. Leave the bottom → the box
 // folds (visual only); reach it again → it re-opens. 96 (was 64, owner
@@ -3066,23 +3064,47 @@ export function DockOverlay({
 	if (!widthMorphRef.current) widthMorphRef.current = createDockWidthMorph();
 	useIsoLayoutEffect(() => () => widthMorphRef.current?.dispose(), []);
 
-	// The reserve grows immediately, but never shrinks while a question or
-	// practice problem owns the dock: shrinking flow space could pin a nearby
-	// learner back to the bottom. Composer mode may give space back.
+	// The base dock reserve grows immediately and stays monotonic while the SAME
+	// question or practice problem owns the dock (preventing a nearby learner
+	// from being pinned back to the bottom), while ephemeral keyboardInset is
+	// layered outside the watermark so closing the iPad keyboard immediately
+	// releases the extra gap. ConversationContent already provides 48px of
+	// bottom breathing room (gap-8 + p-4), so blockH + kb keeps the last line
+	// cleanly clear of the dock without dead empty space.
+	const baseReserveRef = useRef(0);
 	const reserveRef = useRef(0);
+	const lastBlockHRef = useRef(0);
 	const keyboardInsetRef = useRef(keyboardInset);
 	keyboardInsetRef.current = keyboardInset;
+	const pendingKeyRef = useRef<string | null>(null);
+	const currentPendingKey =
+		pending?.toolCallId ??
+		(pluginQuestion ? pluginQuestionOccurrenceKey(pluginQuestion.occurrence) : null) ??
+		practice?.toolCallId ??
+		pluginPractice?.snapshot.problemId ??
+		null;
+	if (pendingKeyRef.current !== currentPendingKey) {
+		pendingKeyRef.current = currentPendingKey;
+		baseReserveRef.current = 0;
+	}
 	const offer = useCallback((blockH: number) => {
+		lastBlockHRef.current = blockH;
 		const kb = keyboardInsetRef.current;
-		const gradH = kb > 40 ? 32 : GRADIENT_H;
-		const next = blockH + gradH + kb;
-		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
+		const nextBase = pendingRef.current
+			? Math.max(baseReserveRef.current, blockH)
+			: blockH;
+		const next = nextBase + kb;
+		if (Math.abs(next - reserveRef.current) <= 0.5) return;
 		// Stamp growth at the source, including child-only field resizes, so
 		// stick-to-bottom's catch-up is not mistaken for the learner leaving.
 		if (shouldStampGeometryMute(next, reserveRef.current, pendingRef.current)) geometryAtRef.current = Date.now();
+		baseReserveRef.current = nextBase;
 		reserveRef.current = next;
 		onReserve(next);
 	}, [onReserve]);
+	useIsoLayoutEffect(() => {
+		if (lastBlockHRef.current > 0) offer(lastBlockHRef.current);
+	}, [keyboardInset, currentPendingKey, offer]);
 
 	// The overlay must not paint over the scroller's scrollbar (owner, scroll
 	// round 2): the scroller reserves symmetric gutters (scrollbar-gutter:
@@ -3291,7 +3313,7 @@ export function DockOverlay({
 
 	return (
 		<div className="pointer-events-none absolute inset-x-0" style={{ right: sbInset, bottom: keyboardInset }}>
-			<div className={cn("bg-gradient-to-t from-background via-background/85 to-transparent", keyboardInset > 40 ? "h-8" : "h-24")} />
+			<div className={cn("bg-gradient-to-t from-background via-background/85 to-transparent", keyboardInset > 40 ? "h-6" : "h-10")} />
 			<div ref={blockRef} className={cn("relative bg-background pl-[var(--lh-safe-left)] pr-[var(--lh-safe-right)]", keyboardInset > 40 ? "pb-2" : "pb-[max(1.25rem,var(--lh-safe-bottom))]")}>
 				<div ref={dockRef} data-dock-width={adaptedW ?? undefined} className={DOCK} style={adaptedW ? { maxWidth: adaptedW } : undefined}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">

@@ -6,11 +6,12 @@ This is a maintainer reference. For installation and normal use, start with [Get
 
 | Platform / Target | Release runner | Packages | In-app update |
 | --- | --- | --- | --- |
+| macOS, Apple Silicon (`arm64`) | `macos-26` | Unsigned `.dmg` (`LearnHarness-<v>-arm64.dmg`) | Manual `.dmg` download (Squirrel.Mac rejects unsigned bundles; auto-updater disables itself cleanly on unsigned macOS builds) |
 | Windows, x64 | `windows-2025` | Unsigned per-user NSIS installer | NSIS (`latest.yml`) |
 | Linux, x64 (Desktop) | `ubuntu-24.04` | AppImage + `.deb` | AppImage replacement; `.deb` through dpkg/apt, with elevation if needed (`latest-linux.yml`) |
-| Linux, x64 (Self-hosted server) | `ubuntu-24.04` | Prebuilt `.next/standalone` tarball (`LearnHarness-<v>-server-linux-x64.tar.gz`) | Manual tarball replacement (see [Setup and Operation](setup-and-operation.md#63-updating-the-server-safely)) |
+| Linux, x64 (Self-hosted server) | `ubuntu-24.04` | Prebuilt `.next/standalone` tarball (`LearnHarness-<v>-server-linux-x64.tar.gz`) | One-command atomic updater (`scripts/update-server.sh`, see [Setup and Operation](setup-and-operation.md#12-install-or-build-the-standalone-server-payload)) |
 
-> **macOS:** Automated releases in this fork intentionally omit macOS installers because Apple Developer signing/notarization secrets are not configured. Ordinary CI (`ci.yml`) still runs macOS build/boot checks on `macos-15`, and `electron-builder.yml` retains the macOS configuration for local signed builds.
+> **macOS Gatekeeper note:** Because automated releases in this fork are unsigned (no Apple Developer signing/notarization secrets configured), macOS users drag `LearnHarness.app` to `/Applications` and run once in Terminal: `xattr -cr /Applications/LearnHarness.app`. Ordinary CI (`ci.yml`) still runs macOS build/boot checks on `macos-15`, and `electron-builder.yml` retains the full macOS signing/notarization configuration for local signed builds (`npm run desktop:dist`).
 
 Windows may show SmartScreen/unknown-publisher warnings. AppImage is the primary Linux desktop download; `.deb` updates may require an administrator password. Both use the same download/restart banner. Targets are defined in [`electron-builder.yml`](../electron-builder.yml); CI/release uses **Node 26**.
 
@@ -58,20 +59,21 @@ npx electron-builder --linux --x64 --publish never # Linux
 [Desktop release](../.github/workflows/release.yml) has two modes:
 
 - **Manual dispatch:** unsigned rehearsal installers and the Linux server tarball retained as workflow artifacts for seven days. No release creation or publication.
-- **Matching `v<package.json version>` tag:** gates, one shared draft-preparation job, two OS packaging/upload jobs (`windows-x64` and `linux-x64` + server tarball), then read-only draft verification. Published/ambiguous existing releases fail preparation; same-ref runs serialize rather than cancelling uploads. **The workflow never publishes the draft.**
+- **Matching `v<package.json version>` tag:** gates, one shared draft-preparation job, three OS packaging/upload jobs (`mac-arm64` unsigned DMG, `windows-x64`, and `linux-x64` + server tarball), then read-only draft verification. Published/ambiguous existing releases fail preparation; same-ref runs serialize rather than cancelling uploads. **The workflow never publishes the draft.**
 
 ### Draft verification
 
-[`scripts/verify-release.ts`](../scripts/verify-release.ts) runs after both packaging jobs. It requires one draft matched by `v<version>` or bare `<version>`, refusing zero/two matches or a published match. Bare-version matches warn because later runs could split assets across tags.
+[`scripts/verify-release.ts`](../scripts/verify-release.ts) runs after all three packaging jobs. It requires one draft matched by `v<version>` or bare `<version>`, refusing zero/two matches or a published match. Bare-version matches warn because later runs could split assets across tags.
 
-The draft must contain **exactly 7 uploaded, nonempty assets**:
+The draft must contain **exactly 8 uploaded, nonempty assets**:
 
 | Assets | Purpose |
 | --- | --- |
+| `LearnHarness-<v>-arm64.dmg` | macOS Apple Silicon unsigned installer (manual updates) |
 | `LearnHarness-<v>-x64-setup.exe` + `.blockmap` | Windows installer/updater |
 | `LearnHarness-<v>-x86_64.AppImage` | Linux AppImage |
 | `LearnHarness-<v>-amd64.deb` | Debian package |
-| `latest.yml`, `latest-linux.yml` | Updater feeds |
+| `latest.yml`, `latest-linux.yml` | Updater feeds (Windows &amp; Linux) |
 | `LearnHarness-<v>-server-linux-x64.tar.gz` | Prebuilt Linux x64 standalone server bundle |
 
 Feed versions, exact referenced asset sets, bare filenames, sizes, and legacy path/hash fields must agree. Missing/stale extra assets, path traversal/URLs, or builder naming drift fail validation. The validator does not download/hash every installer; it checks draft metadata and downloaded feeds.

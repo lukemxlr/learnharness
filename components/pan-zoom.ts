@@ -53,3 +53,37 @@ export function zoomedGraphView(
 	const k = zoom / view.zoom;
 	return { zoom, x: focus.x - (focus.x - view.x) * k, y: focus.y - (focus.y - view.y) * k };
 }
+
+export interface Point2D {
+	x: number;
+	y: number;
+}
+
+/** Two-finger pinch-zoom + simultaneous pan in viewport coordinates.
+ *  Keeps the content point under the previous midpoint aligned under the new
+ *  midpoint while scaling by nextDist / prevDist, clamped to [floor, ZOOM_MAX].
+ *  Re-centers cleanly when returning to the fit floor. Pure. */
+export function pinchGraphView(
+	view: Viewport,
+	prevA: Point2D,
+	prevB: Point2D,
+	nextA: Point2D,
+	nextB: Point2D,
+	floor: number,
+	box: { w: number; h: number },
+	viewport: { w: number; h: number },
+): Viewport {
+	const prevMid = { x: (prevA.x + prevB.x) / 2, y: (prevA.y + prevB.y) / 2 };
+	const nextMid = { x: (nextA.x + nextB.x) / 2, y: (nextA.y + nextB.y) / 2 };
+	const prevDist = Math.hypot(prevB.x - prevA.x, prevB.y - prevA.y);
+	const nextDist = Math.hypot(nextB.x - nextA.x, nextB.y - nextA.y);
+	const factor = prevDist > 1e-3 && nextDist > 1e-3 ? nextDist / prevDist : 1;
+	const zoom = Math.min(Math.max(view.zoom * factor, floor), ZOOM_MAX);
+	if (zoom <= floor + 1e-9) return fitGraphView(box, viewport, floor);
+	const k = zoom / view.zoom;
+	return {
+		zoom,
+		x: nextMid.x - (prevMid.x - view.x) * k,
+		y: nextMid.y - (prevMid.y - view.y) * k,
+	};
+}

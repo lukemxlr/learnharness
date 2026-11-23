@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld("lh", {
 	installUpdate: () => ipcRenderer.send("lh:update-install"),
 	getUpdateState: () => ipcRenderer.invoke("lh:update:get"),
 	checkForUpdates: () => ipcRenderer.invoke("lh:update:check"),
+	getAutoUpdate: () => ipcRenderer.invoke("lh:remote:get-auto-update"),
+	setAutoUpdate: (on) => ipcRenderer.invoke("lh:remote:set-auto-update", Boolean(on)),
 	onOpenSettings: (cb) => {
 		openSettingsListener = cb;
 		if (pendingOpenSettings !== null) {

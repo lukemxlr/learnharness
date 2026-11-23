@@ -31,15 +31,15 @@ LearnHarness runs in production as a standalone Next.js server (`node /opt/learn
 
 Choose **Option A** (fastest, works on 2 GB RAM LXCs) or **Option B** (build from source; recommend at least 4 GB RAM or building inside Docker on a build machine because `next build` + TypeScript checking peaks above 2 GB RAM, whereas the running server uses only `~150–200 MB` RAM).
 
-#### Option A — Deploy the prebuilt Linux x64 release tarball (recommended for 2 GB RAM LXCs)
+#### Option A — Deploy or upgrade via the prebuilt Linux x64 release tarball (recommended for 2 GB RAM LXCs)
 
 ```bash
-# Clone the repo once for systemd templates and CLI tools (user-auth.mjs, migrate-profile.mjs)
+# Clone the repo once for systemd templates and CLI tools (user-auth.mjs, migrate-profile.mjs, update-server.sh)
 git clone https://github.com/lukemxlr/learnharness.git /opt/learnharness/src
 cd /opt/learnharness/src
 
 # Download and unpack the matching prebuilt standalone bundle from GitHub Releases
-VERSION=0.7.1
+VERSION=0.7.3
 curl -fsSL -o "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz" \
   "https://github.com/lukemxlr/learnharness/releases/download/v${VERSION}/LearnHarness-${VERSION}-server-linux-x64.tar.gz"
 
@@ -49,6 +49,15 @@ sudo tar -xzf "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz" -C /opt/lea
 sudo chown -R learnharness:learnharness /opt/learnharness/standalone
 rm -f "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz"
 ```
+
+**Upgrading an existing server later (1 command with automatic rollback):**
+
+```bash
+# Update to the latest GitHub release (or pass a specific tag like v0.7.3)
+sudo bash /opt/learnharness/src/scripts/update-server.sh
+```
+
+`scripts/update-server.sh` downloads the prebuilt Linux x64 server bundle, verifies its `server.js` and `package.json`, atomically swaps `/opt/learnharness/standalone`, restarts `learnharness.service`, verifies `/api/health`, and automatically rolls back to the previous build if the health check fails. Your data in `/var/lib/learnharness/data` is never touched.
 
 #### Option B — Build the standalone server from source (4 GB+ RAM host or Docker)
 

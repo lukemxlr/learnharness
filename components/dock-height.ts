@@ -127,10 +127,22 @@ export function syncDockHeight(elements: DockHeightElements, expanded: boolean) 
 	const vv = column.ownerDocument?.defaultView?.visualViewport;
 	if (vv && vv.height > 0) {
 		const colRect = column.getBoundingClientRect();
-		const vvTop = vv.offsetTop ?? 0;
-		const vvBottom = vvTop + vv.height;
-		const visibleColumnH = Math.max(0, Math.min(colRect.bottom, vvBottom) - Math.max(colRect.top, vvTop));
-		effectiveColumnHeight = Math.min(effectiveColumnHeight, visibleColumnH);
+		// On iPadOS Safari / standalone PWA, opening the soft keyboard pans
+		// visualViewport.offsetTop (> 0) and shifts getBoundingClientRect() into
+		// visual-viewport coordinates (colRect.top < 0, colRect.bottom <= vv.height).
+		// Intersecting colRect against [0, vv.height] (never re-adding offsetTop)
+		// works identically across iPadOS WebKit and Desktop Chromium and prevents
+		// the dock viewport from collapsing to 0px while typing.
+		if (colRect.height > 0) {
+			const visibleTop = Math.max(0, colRect.top);
+			const visibleBottom = Math.min(colRect.bottom, vv.height);
+			const visibleColumnH = Math.max(0, visibleBottom - visibleTop);
+			if (visibleColumnH > 0) {
+				effectiveColumnHeight = Math.min(effectiveColumnHeight, visibleColumnH);
+			}
+		} else {
+			effectiveColumnHeight = Math.min(effectiveColumnHeight, vv.height);
+		}
 	}
 	const budget = dockHeightBudget({
 		columnHeight: effectiveColumnHeight,

@@ -45,7 +45,7 @@ const {
 } = require("./remote-config.cjs");
 const { inspectLocalDataDir, migrateLocalDataToServer } = require("./local-migrate.cjs");
 const { randomBytes } = require("node:crypto");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
@@ -459,12 +459,127 @@ function windowChromeOptions() {
 let activeCfAuthPromise = null;
 let lastCfAuthAt = 0;
 
-function probeWithElectronSession(serverUrl, opts = {}) {
-	if (typeof electronNet?.fetch === "function") {
-		return probeServerHealth(serverUrl, {
-			...opts,
-			fetchImpl: (...args) => electronNet.fetch(...args),
+function readHeaderCaseInsensitive(headers, targetLower) {
+	if (!headers || typeof headers !== "object") return undefined;
+	for (const [key, val] of Object.entries(headers)) {
+		if (key.toLowerCase() === targetLower) return val;
+	}
+	return undefined;
+}
+
+function probeWithElectronRequest(serverUrl, timeoutMs = 5000) {
+	const validated = validateServerUrl(serverUrl);
+	if (!validated.ok) return Promise.resolve({ ok: false, error: validated.error });
+	const origin = validated.origin;
+	const healthUrl = `${origin}/api/health`;
+	return new Promise((resolve) => {
+		let settled = false;
+		let timer;
+		let req;
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			if (timer !== undefined) {
+				clearTimeout(timer);
+				timer = undefined;
+			}
+			resolve(result);
+		};
+		try {
+			req = electronNet.request({
+				method: "GET",
+				url: healthUrl,
+				redirect: "manual",
+				useSessionCookies: true,
+			});
+			req.setHeader("Accept", "application/json");
+		} catch (err) {
+			finish({ ok: false, error: err?.message || "Could not create health request." });
+			return;
+		}
+		timer = setTimeout(() => {
+			finish({ ok: false, error: `Connection timed out after ${timeoutMs}ms.` });
+			try { req.abort(); } catch { /* ignore */ }
+		}, timeoutMs);
+		timer.unref?.();
+
+		req.on("redirect", (statusCode, _method, redirectUrl, responseHeaders) => {
+			const wwwAuth = readHeaderCaseInsensitive(responseHeaders, "www-authenticate");
+			const cf = detectCloudflareAccessResponse(statusCode, redirectUrl, wwwAuth);
+			if (cf.isCfAccess) {
+				finish({
+					ok: false,
+					needsCloudflareAuth: true,
+					origin,
+					authUrl: cf.authUrl || redirectUrl || healthUrl,
+					teamOrigin: cf.teamOrigin,
+					error: "Cloudflare Access sign-in required.",
+				});
+			} else {
+				finish({ ok: false, error: `Server redirected unexpectedly (HTTP ${statusCode}).` });
+			}
+			try { req.abort(); } catch { /* ignore */ }
 		});
+
+		req.on("response", (res) => {
+			const loc = readHeaderCaseInsensitive(res.headers, "location");
+			const wwwAuth = readHeaderCaseInsensitive(res.headers, "www-authenticate");
+			const cf = detectCloudflareAccessResponse(res.statusCode, loc, wwwAuth);
+			if (cf.isCfAccess) {
+				finish({
+					ok: false,
+					needsCloudflareAuth: true,
+					origin,
+					authUrl: cf.authUrl || healthUrl,
+					teamOrigin: cf.teamOrigin,
+					error: "Cloudflare Access sign-in required.",
+				});
+				try { req.abort(); } catch { /* ignore */ }
+				return;
+			}
+			const chunks = [];
+			let bytes = 0;
+			res.on("data", (chunk) => {
+				if (settled) return;
+				bytes += chunk.length;
+				if (bytes > 16_384) {
+					finish({ ok: false, error: "Server health response exceeded maximum size." });
+					try { req.abort(); } catch { /* ignore */ }
+					return;
+				}
+				chunks.push(chunk);
+			});
+			res.on("end", () => {
+				if (settled) return;
+				if (res.statusCode !== 200) {
+					finish({ ok: false, error: `Server responded with HTTP ${res.statusCode ?? "unknown"}.` });
+					return;
+				}
+				try {
+					const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+					if (body && body.ok === true) finish({ ok: true, origin });
+					else finish({ ok: false, error: "Server health check returned an unexpected response." });
+				} catch {
+					finish({ ok: false, error: "Server health check returned invalid JSON." });
+				}
+			});
+			res.on("error", (err) => {
+				finish({ ok: false, error: err?.message || "Server health response failed." });
+			});
+		});
+
+		req.on("error", (err) => {
+			finish({ ok: false, error: err?.message || "Could not reach the server." });
+		});
+
+		req.end();
+	});
+}
+
+function probeWithElectronSession(serverUrl, opts = {}) {
+	if (typeof electronNet?.request === "function") {
+		const timeoutMs = typeof opts.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : 5000;
+		return probeWithElectronRequest(serverUrl, timeoutMs);
 	}
 	return probeServerHealth(serverUrl, opts);
 }
@@ -510,15 +625,18 @@ function openCloudflareAccessWindow(serverOrigin, authUrl) {
 			}
 		} catch { /* optional */ }
 
-		const handleReturnToOrigin = (targetUrl) => {
+		const completeReturnToOrigin = (targetUrl) => {
+			if (settled) return;
 			const targetOrigin = originForHttpUrl(targetUrl);
-			if (targetOrigin && targetOrigin === serverOrigin) {
-				// Let Cloudflare's Set-Cookie response settle on /cdn-cgi/access/authorized before closing
-				if (!targetUrl.includes("/cdn-cgi/access/")) {
-					lastCfAuthAt = Date.now();
-					finish({ ok: true });
-					closeWindowSafely(authWin);
-				}
+			if (targetOrigin && targetOrigin === serverOrigin && !targetUrl.includes("/cdn-cgi/access/")) {
+				lastCfAuthAt = Date.now();
+				const flush = session.defaultSession.cookies?.flushStore?.();
+				Promise.resolve(flush)
+					.catch(() => {})
+					.finally(() => {
+						finish({ ok: true });
+						closeWindowSafely(authWin);
+					});
 			}
 		};
 
@@ -527,21 +645,17 @@ function openCloudflareAccessWindow(serverOrigin, authUrl) {
 			try { parsed = new URL(target); } catch { event.preventDefault(); return; }
 			if (parsed.protocol !== "https:") {
 				event.preventDefault();
-				return;
 			}
-			handleReturnToOrigin(target);
 		});
 		authWin.webContents.on("will-redirect", (event, target) => {
 			let parsed;
 			try { parsed = new URL(target); } catch { event.preventDefault(); return; }
 			if (parsed.protocol !== "https:") {
 				event.preventDefault();
-				return;
 			}
-			handleReturnToOrigin(target);
 		});
 		authWin.webContents.on("did-navigate", (_event, target) => {
-			handleReturnToOrigin(target);
+			completeReturnToOrigin(target);
 		});
 		authWin.webContents.setWindowOpenHandler?.(({ url: target }) => {
 			let parsed;
@@ -819,8 +933,8 @@ function installRemoteWebRequestHandlers() {
 					}
 				});
 			}
-			const locHeader = responseHeaders.location ?? responseHeaders.Location;
-			const wwwHeader = responseHeaders["www-authenticate"] ?? responseHeaders["Www-Authenticate"];
+			const locHeader = readHeaderCaseInsensitive(responseHeaders, "location");
+			const wwwHeader = readHeaderCaseInsensitive(responseHeaders, "www-authenticate");
 			const cf = detectCloudflareAccessResponse(details.statusCode, locHeader, wwwHeader);
 			if (
 				cf.isCfAccess &&
@@ -910,6 +1024,13 @@ function reportUpdateStatus(status, version = null) {
  * explicit false opts out; absent/corrupt/unreadable settings keep updates ON.
  * Re-read for each automatic check so saving the toggle needs no restart. */
 function automaticUpdatesEnabled() {
+	if (remoteModeActive) {
+		try {
+			return readRemoteConfig(app.getPath("userData")).autoUpdate !== false;
+		} catch {
+			return true;
+		}
+	}
 	try {
 		const settings = JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"));
 		return settings?.general?.autoUpdate !== false;
@@ -949,9 +1070,30 @@ function installUpdateNow() {
 	autoUpdater?.quitAndInstall();
 }
 
+function isUnsignedMacAppBundle() {
+	if (process.platform !== "darwin") return false;
+	if (process.env.LH_UPDATE_FEED) return false;
+	if (typeof process.execPath !== "string" || !process.execPath.includes(".app/Contents/MacOS/")) return false;
+	if (typeof spawnSync !== "function") return false;
+	try {
+		const res = spawnSync("codesign", ["-dv", process.execPath], { encoding: "utf8", timeout: 3000 });
+		if (res.error) return false;
+		if (res.status !== 0) return true;
+		const out = `${res.stdout || ""}\n${res.stderr || ""}`;
+		return /Signature=adhoc/i.test(out) || !/^Authority=/m.test(out);
+	} catch {
+		return false;
+	}
+}
+
 function setupAutoUpdater() {
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
+		reportUpdateStatus("disabled");
+		return;
+	}
+	if (isUnsignedMacAppBundle()) {
+		log("auto-update: unsigned macOS build — updates install manually via .dmg");
 		reportUpdateStatus("disabled");
 		return;
 	}
@@ -1284,6 +1426,32 @@ async function main() {
 		ipcMain.handle("lh:update:check", (event) => {
 			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) throw new Error("Untrusted desktop request.");
 			checkForUpdates({ manual: true });
+		});
+
+		ipcMain.handle("lh:remote:get-auto-update", (event) => {
+			const win = BrowserWindow.fromWebContents(event.sender);
+			if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
+				throw new Error("Untrusted remote request.");
+			}
+			return readRemoteConfig(app.getPath("userData")).autoUpdate !== false;
+		});
+
+		ipcMain.handle("lh:remote:set-auto-update", (event, enabled) => {
+			const win = BrowserWindow.fromWebContents(event.sender);
+			if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
+				throw new Error("Untrusted remote request.");
+			}
+			const nextVal = Boolean(enabled);
+			const current = readRemoteConfig(app.getPath("userData"));
+			if (current.mode === "remote" && current.serverUrl) {
+				activeRemoteConfig = writeRemoteConfig(app.getPath("userData"), {
+					mode: "remote",
+					serverUrl: current.serverUrl,
+					allowInsecureLanMic: Boolean(current.allowInsecureLanMic),
+					autoUpdate: nextVal,
+				});
+			}
+			return nextVal;
 		});
 
 		ipcMain.handle("lh:remote:change-server", (event) => {

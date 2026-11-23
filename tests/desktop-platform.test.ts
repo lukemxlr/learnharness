@@ -303,7 +303,7 @@ describe("workflow action versions", () => {
 			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
 			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
 			if (filename === "release.yml") {
-				expected.push("actions/github-script@v9", "actions/upload-artifact@v7");
+				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
 			}
 			const observed = new Set<string>();
 			for (const job of Object.values(workflow.jobs)) {
@@ -394,16 +394,28 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("packages Windows x64, Linux x64, and the prebuilt Linux server tarball, retaining macOS 15 CI", () => {
+	it("packages unsigned macOS arm64 DMG, Windows x64, Linux x64, and the prebuilt Linux server tarball, retaining macOS 15 CI", () => {
 		const platforms = packaging.strategy?.matrix.include ?? [];
 		assert.deepEqual(
 			platforms.map(entry => ({ os: entry.os, platform: entry.platform, builder_args: entry.builder_args })),
 			[
+				{ os: "macos-26", platform: "mac-arm64", builder_args: "--mac dmg --arm64" },
 				{ os: "windows-2025", platform: "windows-x64", builder_args: "--win --x64" },
 				{ os: "ubuntu-24.04", platform: "linux-x64", builder_args: "--linux --x64" },
 			],
 		);
 		assert.equal(packaging["runs-on"], "${{ matrix.os }}");
+		const xcodeStep = packaging.steps.find(step => step.uses === "maxim-lobanov/setup-xcode@v1");
+		assert.ok(xcodeStep, "macOS release job selects Xcode 26+ for build/icon.icon");
+		assert.equal(xcodeStep.if, "runner.os == 'macOS'");
+		assert.equal(xcodeStep.with?.["xcode-version"], "latest-stable");
+		const macBuildStep = packaging.steps.find(step => step.run?.includes("-c.mac.notarize=false"));
+		assert.ok(macBuildStep, "macOS release job builds unsigned DMG without notarization");
+		assert.equal(macBuildStep.if, "runner.os == 'macOS'");
+		assert.equal(macBuildStep.env?.CSC_IDENTITY_AUTO_DISCOVERY, "false");
+		const macUploadStep = packaging.steps.find(step => step.run?.includes("gh release upload") && step.run?.includes("arm64.dmg"));
+		assert.ok(macUploadStep, "macOS release job uploads the arm64 DMG to the draft release");
+		assert.equal(macUploadStep.if, "github.event_name == 'push' && runner.os == 'macOS'");
 		const serverPackStep = packaging.steps.find(step => step.run?.includes("server-linux-x64.tar.gz") && step.run?.includes("tar -C .next/standalone"));
 		assert.ok(serverPackStep, "Linux release job packages the prebuilt standalone server tarball");
 		assert.equal(serverPackStep.if, "runner.os == 'Linux'");

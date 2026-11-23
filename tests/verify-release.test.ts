@@ -64,8 +64,9 @@ function healthyFeeds(version: string, release: ReleaseRecord): Record<string, s
 }
 
 describe("release gate — expected asset inventory", () => {
-	it("is exactly the 7 verified builder and server outputs for the version", () => {
+	it("is exactly the 8 verified builder, macOS DMG, and server outputs for the version", () => {
 		assert.deepEqual(expectedAssets(VERSION).files, [
+			"LearnHarness-0.2.0-arm64.dmg",
 			"LearnHarness-0.2.0-x64-setup.exe",
 			"LearnHarness-0.2.0-x86_64.AppImage",
 			"LearnHarness-0.2.0-amd64.deb",
@@ -397,19 +398,20 @@ describe("release gate — CLI (offline, repo config)", () => {
 		try {
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 0, String(result.stderr));
-			assert.match(result.stdout, /7\/7 expected files present/);
+			assert.match(result.stdout, /8\/8 expected files present/);
 			assert.ok(result.stdout.includes(`OK: draft for ${TAG} is complete`));
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
 	});
 
-	it("verify fails a draft with a missing blockmap, missing server tarball, and a stale asset", () => {
+	it("verify fails a draft with a missing macOS DMG, missing blockmap, missing server tarball, and a stale asset", () => {
 		const { root } = workspace();
 		try {
 			const release = healthyRelease(VERSION);
 			release.assets = release.assets.filter(
 				(entry) =>
+					entry.name !== `LearnHarness-${VERSION}-arm64.dmg` &&
 					entry.name !== `LearnHarness-${VERSION}-x64-setup.exe.blockmap` &&
 					entry.name !== `LearnHarness-${VERSION}-server-linux-x64.tar.gz`,
 			);
@@ -417,6 +419,7 @@ describe("release gate — CLI (offline, repo config)", () => {
 			fs.writeFileSync(path.join(root, "releases.json"), JSON.stringify([release]));
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 1);
+			assert.match(result.stderr, /arm64\.dmg: missing from the release/);
 			assert.match(result.stderr, /x64-setup\.exe\.blockmap: missing from the release/);
 			assert.match(result.stderr, /server-linux-x64\.tar\.gz: missing from the release/);
 			assert.match(result.stderr, /0\.1\.0-x64-setup\.exe: unexpected asset/);

@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/components/pan-zoom";
+import { fitGraphView, fitZoomFor, pinchGraphView, zoomedGraphView, type Point2D, type Viewport } from "@/components/pan-zoom";
 import { renderMermaid } from "@/components/mermaid-render";
 import { useAppearance } from "@/components/settings/appearance";
 import { MermaidError } from "@/components/mermaid-error";
@@ -182,32 +182,63 @@ export function MermaidOverlay({
 		return () => el.removeEventListener("wheel", onWheel);
 	}, [fitZoom, box, size]);
 
-	const dragRef = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+	const dragRef = useRef<{ pointerId: number; px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+	const pointersRef = useRef<Map<number, Point2D>>(new Map());
+	const toLocalPoint = (el: HTMLElement, e: React.PointerEvent<HTMLDivElement>): Point2D => {
+		const rect = el.getBoundingClientRect();
+		return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+	};
 	const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (e.button !== 0) return;
+		if (e.pointerType === "mouse" && e.button !== 0) return;
 		if ((e.target as HTMLElement).closest("button")) return;
+		const pt = toLocalPoint(e.currentTarget, e);
+		pointersRef.current.set(e.pointerId, pt);
+		try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+		if (pointersRef.current.size >= 2) {
+			dragRef.current = null;
+			setPanning(true);
+			e.currentTarget.classList.remove("cursor-grabbing");
+			return;
+		}
 		if (atFloor) return;
-		dragRef.current = { px: e.clientX, py: e.clientY, x: view.x, y: view.y, moved: false };
+		dragRef.current = { pointerId: e.pointerId, px: e.clientX, py: e.clientY, x: view.x, y: view.y, moved: false };
 		setPanning(true);
 		e.currentTarget.classList.add("cursor-grabbing");
-		e.currentTarget.setPointerCapture(e.pointerId);
 	};
 	const moveDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (pointersRef.current.size >= 2 && pointersRef.current.has(e.pointerId)) {
+			const entries = [...pointersRef.current.entries()];
+			const [idA, prevA] = entries[0]!;
+			const [idB, prevB] = entries[1]!;
+			const nextPt = toLocalPoint(e.currentTarget, e);
+			pointersRef.current.set(e.pointerId, nextPt);
+			const nextA = idA === e.pointerId ? nextPt : prevA;
+			const nextB = idB === e.pointerId ? nextPt : prevB;
+			userAdjustedRef.current = true;
+			setView((v) => pinchGraphView(v, prevA, prevB, nextA, nextB, fitZoom, box, size));
+			return;
+		}
+		if (pointersRef.current.has(e.pointerId)) {
+			pointersRef.current.set(e.pointerId, toLocalPoint(e.currentTarget, e));
+		}
 		const d = dragRef.current;
-		if (!d) return;
+		if (!d || d.pointerId !== e.pointerId) return;
 		d.moved = true;
 		setView((v) =>
 			v.zoom <= fitZoom + 1e-9 ? v : { ...v, x: d.x + (e.clientX - d.px), y: d.y + (e.clientY - d.py) },
 		);
 	};
 	const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		pointersRef.current.delete(e.pointerId);
 		const d = dragRef.current;
-		if (d) {
+		if (d && d.pointerId === e.pointerId) {
 			dragRef.current = null;
 			if (d.moved) userAdjustedRef.current = true;
 		}
-		setPanning(false);
-		e.currentTarget.classList.remove("cursor-grabbing");
+		if (pointersRef.current.size === 0) {
+			setPanning(false);
+			e.currentTarget.classList.remove("cursor-grabbing");
+		}
 	};
 	const stepZoom = (factor: number) => {
 		userAdjustedRef.current = true;

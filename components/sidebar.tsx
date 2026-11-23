@@ -79,6 +79,9 @@ declare global {
 			isRemoteMode?: boolean;
 			/** Read-only Electron desktop app version (preload-remote.cjs). */
 			getAppVersion?: () => Promise<string>;
+			/** Read/write remote-mode desktop auto-update preference in remote-config.json. */
+			getAutoUpdate?: () => Promise<boolean>;
+			setAutoUpdate?: (on: boolean) => Promise<boolean>;
 			/** Opens the remote server connection setup screen in Electron mode. */
 			changeServerUrl?: () => Promise<unknown>;
 			/** Inspect fixed local desktop data directory counts for 1-click server migration. */

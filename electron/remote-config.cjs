@@ -123,15 +123,16 @@ function detectCloudflareAccessResponse(statusCode, locationHeader, wwwAuthentic
 }
 
 function readRemoteConfig(userDataDir) {
-	const failClosed = { mode: "unset", serverUrl: null, allowInsecureLanMic: false };
+	const failClosed = { mode: "unset", serverUrl: null, allowInsecureLanMic: false, autoUpdate: true };
 	if (typeof userDataDir !== "string" || !userDataDir) return failClosed;
 	try {
 		const raw = fs.readFileSync(configPath(userDataDir), "utf8");
 		const parsed = JSON.parse(raw);
 		if (!parsed || typeof parsed !== "object") return failClosed;
 		const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : undefined;
+		const autoUpdate = parsed.autoUpdate !== false;
 		if (parsed.mode === "local") {
-			return { mode: "local", serverUrl: null, allowInsecureLanMic: false, ...(updatedAt ? { updatedAt } : {}) };
+			return { mode: "local", serverUrl: null, allowInsecureLanMic: false, autoUpdate, ...(updatedAt ? { updatedAt } : {}) };
 		}
 		if (parsed.mode === "remote") {
 			const validated = validateServerUrl(parsed.serverUrl);
@@ -142,6 +143,7 @@ function readRemoteConfig(userDataDir) {
 				mode: "remote",
 				serverUrl: validated.serverUrl,
 				allowInsecureLanMic,
+				autoUpdate,
 				...(updatedAt ? { updatedAt } : {}),
 			};
 		}
@@ -167,10 +169,12 @@ function writeRemoteConfig(userDataDir, next) {
 		allowInsecureLanMic =
 			next.allowInsecureLanMic === true && isPrivateLanOrTailscaleHttpOrigin(normalizedServerUrl);
 	}
+	const prevAutoUpdate = next.autoUpdate === undefined ? readRemoteConfig(userDataDir).autoUpdate : next.autoUpdate !== false;
 	const record = {
 		mode: next.mode,
 		serverUrl: normalizedServerUrl,
 		allowInsecureLanMic,
+		autoUpdate: prevAutoUpdate,
 		updatedAt: new Date().toISOString(),
 	};
 	fs.mkdirSync(userDataDir, { recursive: true });
@@ -203,6 +207,18 @@ async function probeWithFetch(healthUrl, origin, fetchImpl, timeoutMs) {
 			redirect: "manual",
 			signal: controller.signal,
 		});
+		if (typeof res.url === "string" && isCloudflareAccessUrl(res.url)) {
+			let teamOrigin = null;
+			try { teamOrigin = new URL(res.url).origin; } catch { /* ignore */ }
+			return {
+				ok: false,
+				needsCloudflareAuth: true,
+				origin,
+				authUrl: res.url,
+				teamOrigin,
+				error: "Cloudflare Access sign-in required.",
+			};
+		}
 		const cf = detectCloudflareAccessResponse(
 			res.status,
 			res.headers?.get?.("location"),

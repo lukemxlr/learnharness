@@ -604,10 +604,14 @@ function RemoteServerConnectionRow() {
 			</SettingsRow>
 		);
 	}
+	const connectedOrigin =
+		typeof window !== "undefined" && typeof window.location?.origin === "string" && window.location.origin !== "null"
+			? window.location.origin
+			: null;
 	return (
 		<SettingsRow
 			label="Server connection"
-			hint="Connected to a remote LearnHarness server"
+			hint={connectedOrigin ? `Connected to ${connectedOrigin}` : "Connected to a remote LearnHarness server"}
 			testid="row-remote-server"
 		>
 			<Button
