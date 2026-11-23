@@ -286,9 +286,9 @@ describe("desktop packaging policy", () => {
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
 		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-		assert.equal(pkg.author.name, "Amos Blomqvist");
-		assert.equal(pkg.author.email, "255718537+amosblomqvist@users.noreply.github.com");
-		assert.equal(pkg.homepage, "https://github.com/amosblomqvist/learnharness");
+		assert.equal(pkg.author.name, "Luke");
+		assert.equal(pkg.author.email, "174447302+lukemxlr@users.noreply.github.com");
+		assert.equal(pkg.homepage, "https://github.com/lukemxlr/learnharness");
 		assert.equal(pkg.desktopName, "learnharness.desktop");
 	});
 });
@@ -303,7 +303,7 @@ describe("workflow action versions", () => {
 			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
 			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
 			if (filename === "release.yml") {
-				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
+				expected.push("actions/github-script@v9", "actions/upload-artifact@v7");
 			}
 			const observed = new Set<string>();
 			for (const job of Object.values(workflow.jobs)) {
@@ -394,22 +394,26 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
-		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
-		assert.equal(mac?.builder_args, "--mac --arm64");
+	it("packages Windows x64, Linux x64, and the prebuilt Linux server tarball, retaining macOS 15 CI", () => {
+		const platforms = packaging.strategy?.matrix.include ?? [];
+		assert.deepEqual(
+			platforms.map(entry => ({ os: entry.os, platform: entry.platform, builder_args: entry.builder_args })),
+			[
+				{ os: "windows-2025", platform: "windows-x64", builder_args: "--win --x64" },
+				{ os: "ubuntu-24.04", platform: "linux-x64", builder_args: "--linux --x64" },
+			],
+		);
 		assert.equal(packaging["runs-on"], "${{ matrix.os }}");
-		const xcodeIndex = packaging.steps.findIndex(step => step.uses === "maxim-lobanov/setup-xcode@v1");
-		assert.ok(xcodeIndex >= 0);
-		const xcode = packaging.steps[xcodeIndex];
-		assert.equal(xcode?.if, "runner.os == 'macOS'");
-		assert.equal(xcode?.with?.["xcode-version"], "latest-stable");
-		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
-		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
+		const serverPackStep = packaging.steps.find(step => step.run?.includes("server-linux-x64.tar.gz") && step.run?.includes("tar -C .next/standalone"));
+		assert.ok(serverPackStep, "Linux release job packages the prebuilt standalone server tarball");
+		assert.equal(serverPackStep.if, "runner.os == 'Linux'");
+		const serverUploadStep = packaging.steps.find(step => step.run?.includes("gh release upload") && step.run?.includes("server-linux-x64.tar.gz"));
+		assert.ok(serverUploadStep, "Linux release job uploads the server tarball to the draft release");
+		assert.equal(serverUploadStep.if, "github.event_name == 'push' && runner.os == 'Linux'");
 
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
+		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps macOS build/boot coverage");
 	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {

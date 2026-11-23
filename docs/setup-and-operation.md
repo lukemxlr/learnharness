@@ -27,14 +27,36 @@ LearnHarness runs in production as a standalone Next.js server (`node /opt/learn
    ```
    Keep `/var/lib/learnharness/auth` **outside** `/var/lib/learnharness/data` (`LH_DATA_DIR`) so credentials are never mixed with learning exports or backups.
 
-### 1.2 Build and stage the standalone server payload
+### 1.2 Install or build the standalone server payload
 
-On the LXC host (or a matching Linux x64 Node 26 build container):
+Choose **Option A** (fastest, works on 2 GB RAM LXCs) or **Option B** (build from source; recommend at least 4 GB RAM or building inside Docker on a build machine because `next build` + TypeScript checking peaks above 2 GB RAM, whereas the running server uses only `~150–200 MB` RAM).
+
+#### Option A — Deploy the prebuilt Linux x64 release tarball (recommended for 2 GB RAM LXCs)
 
 ```bash
-git clone <your-fork-url> /opt/learnharness/src
+# Clone the repo once for systemd templates and CLI tools (user-auth.mjs, migrate-profile.mjs)
+git clone https://github.com/lukemxlr/learnharness.git /opt/learnharness/src
 cd /opt/learnharness/src
-git checkout feat/lxc-server-ipad-draw-migration
+
+# Download and unpack the matching prebuilt standalone bundle from GitHub Releases
+VERSION=0.7.1
+curl -fsSL -o "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz" \
+  "https://github.com/lukemxlr/learnharness/releases/download/v${VERSION}/LearnHarness-${VERSION}-server-linux-x64.tar.gz"
+
+sudo rm -rf /opt/learnharness/standalone
+sudo mkdir -p /opt/learnharness/standalone
+sudo tar -xzf "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz" -C /opt/learnharness/standalone
+sudo chown -R learnharness:learnharness /opt/learnharness/standalone
+rm -f "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz"
+```
+
+#### Option B — Build the standalone server from source (4 GB+ RAM host or Docker)
+
+On the LXC host (with >= 4 GB RAM) or a matching Linux x64 Node 26 build container:
+
+```bash
+git clone https://github.com/lukemxlr/learnharness.git /opt/learnharness/src
+cd /opt/learnharness/src
 
 npm ci
 npm run plugins:setup
@@ -112,8 +134,11 @@ LearnHarness validates the incoming `Host` (or `X-Forwarded-Host` when `LH_TRUST
   - Point the tunnel ingress hostname (e.g., `https://learn.example.com`) to `http://127.0.0.1:3000`.
   - Keep `LH_TRUST_PROXY=1` enabled so LearnHarness sees `X-Forwarded-Proto: https` and marks the `lh_session` cookie `Secure`, while validating `Origin` and `Sec-Fetch-Site` against the public HTTPS origin.
   - Ensure no proxy rule buffers or caches `/api/chat`, `/api/chats/*/stream`, `/api/chats/*/side-chats/*`, or `/api/events` (LearnHarness emits `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`, plus periodic keepalive pings).
+  - **Cloudflare Access note:** If you add Cloudflare Access Zero Trust authentication in front of your tunnel and plan to connect with the Electron remote desktop client, add a **Bypass** policy for `/api/health` so Electron's connectivity probe succeeds before interactive login.
 - **LAN HTTP vs. HTTPS**:
-  - On iPadOS Safari over the public internet or untrusted networks, always use your HTTPS Cloudflare Tunnel URL. Direct `http://<LXC-IP>:3000` is intended only for trusted local LAN troubleshooting.
+  - Chat, attachments, Drawing Pad, and copy buttons work over both HTTPS and direct trusted LAN HTTP (`http://<LXC-IP>:3000`), using a browser-safe UUID fallback when `crypto.randomUUID` is unavailable in non-secure contexts.
+  - Browser microphone **Dictation** (`Dictate`) requires a secure browser context (`HTTPS` or `localhost`) and displays a clear `"Dictation requires HTTPS"` notice if clicked over plain LAN HTTP.
+  - On iPadOS Safari or outside your trusted LAN, always use your HTTPS Cloudflare Tunnel or reverse-proxy URL.
 
 ---
 
@@ -198,8 +223,10 @@ node scripts/migrate-profile.mjs export \
 ```
 
 Optional flags:
-- `--source-files-root <dir>`: extra local root folder to search when resolving referenced files (e.g., PDFs or images stored outside `data/`).
+- `--source-files-root <dir>`: extra local root folder (may be repeated) to search when resolving referenced files stored outside `data/` (for example, local lecture PDFs or images attached by path in desktop chats).
 - `--json`: machine-readable export report.
+
+> **Flashcards note:** If you used the built-in **Flashcards** core plugin locally, also copy `<backup>/data/core-plugin-data/flashcards/` to `/var/lib/learnharness/data/core-plugin-data/flashcards/` (owned by `learnharness:learnharness`) while the service is stopped during Step 4.
 
 What `export` guarantees:
 - **Strictly read-only** on `--source`.
@@ -280,6 +307,29 @@ sudo systemctl start learnharness
 
 ### 6.3 Updating the server safely
 
+**Fast update using the prebuilt release tarball (recommended for 2 GB RAM LXCs):**
+
+```bash
+cd /opt/learnharness/src
+git pull --ff-only
+
+VERSION=0.7.1   # replace with the target release version
+curl -fsSL -o "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz" \
+  "https://github.com/lukemxlr/learnharness/releases/download/v${VERSION}/LearnHarness-${VERSION}-server-linux-x64.tar.gz"
+
+sudo systemctl stop learnharness
+sudo rm -rf /opt/learnharness/standalone
+sudo mkdir -p /opt/learnharness/standalone
+sudo tar -xzf "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz" -C /opt/learnharness/standalone
+sudo chown -R learnharness:learnharness /opt/learnharness/standalone
+rm -f "/tmp/LearnHarness-${VERSION}-server-linux-x64.tar.gz"
+sudo systemctl start learnharness
+
+curl -fsS http://127.0.0.1:3000/api/health
+```
+
+**Or rebuild from source (4 GB+ RAM host):**
+
 ```bash
 cd /opt/learnharness/src
 git pull --ff-only
@@ -303,9 +353,9 @@ Your sessions, graph ledgers, attachments, `user-auth.json`, and provider creden
 
 ## 7. Windows Desktop Remote Client & iPadOS Safari Usage
 
-### 7.1 Building and connecting the Windows desktop client
+### 7.1 Installing or building the Windows desktop client
 
-Build the unsigned Windows x64 NSIS installer on a Windows x64 build machine (or disposable Windows VM):
+Download the prebuilt unsigned Windows x64 NSIS installer (`LearnHarness-<version>-x64-setup.exe`) from **[GitHub Releases](https://github.com/lukemxlr/learnharness/releases)**, or build it locally on a Windows x64 machine:
 
 ```powershell
 npm ci
@@ -336,6 +386,7 @@ This produces `dist\LearnHarness-<version>-x64-setup.exe`.
 ### 7.2 iPadOS Safari workflow
 
 1. Open `https://learn.example.com` in **iPadOS Safari** and sign in on `/login` (you can optionally tap **Share → Add to Home Screen**).
+   - The app shell locks viewport overscroll so rubber-banding never drags the outer window while the chat transcript and overlay modals scroll smoothly with touch momentum.
    - In a narrow window, tap **Open sidebar** to show the sessions over the current page. Close it with **Close sidebar** or tap the backdrop.
 2. **Seamless live-stream handoff between Windows and iPad:**
    - Start a prompt or answer on Windows, close your laptop lid, and open the same session URL (`/chat/<id>`) on your iPad.
@@ -344,9 +395,11 @@ This produces `dist\LearnHarness-<version>-x64-setup.exe`.
 3. **Photos, Files, and PDF attachments:**
    - Tap the paperclip attachment control in the chat composer, Free-Response answer, or Multiple-Choice question to choose images (`PNG`, `JPEG`, `WebP`, `GIF` up to 20 MiB) or `.pdf` files (up to 25 MiB / 200 pages) from **Photo Library** or **Files**.
    - Staged attachments show removable previews before submission; if an upload fails, your typed draft and Multiple-Choice selection remain intact.
-4. **Drawing Pad (`Bild 1` overhaul):**
+4. **Drawing Pad (Apple Pencil palm rejection &amp; pinch-zoom):**
    - Enable **Drawing Pad** once in **Settings → Core plugins**.
    - Tap **Draw** in the session top bar to open the full-screen canvas with Apple Pencil / touch / mouse support, optional **Grid** (`Karoraster`), **Undo** / **Redo**, **Pen** / **Eraser** / **Hand** / **Clear**, six ink color swatches, **Stroke width** slider (`2`–`16` px), and collapsible **Question** reference bar.
+   - **Palm rejection (Option A):** Large touch contacts are filtered automatically, Apple Pencil takes priority over palm touches, and the **Stylus-only** toolbar toggle automatically activates on your first Apple Pencil touch (persisted per device, toggleable anytime if you want to sketch with a finger).
+   - **Zoom &amp; pan:** Use **2-finger pinch** (`50%–400%`) to zoom in on fine handwriting and **2-finger drag** to pan across the sheet without leaving stray strokes. Tap the zoom readout button (e.g., `150%`) to reset to `100%` (desktop browsers also support scroll-wheel pan and `Ctrl/Cmd + wheel` zoom). Exported PNGs are always crisp and zoom-independent.
    - Use **Light** / **Dark** / **App** paper theme buttons independently of your app theme (e.g., **Light** paper while the app is in **Dark** mode); monochrome strokes automatically adapt so exported PNGs remain crisp and legible.
    - Incomplete drawings are saved in Safari on that device, per session and question. Tap **Add to answer** to stage the drawing as an attachment preview, then submit your answer so the image appears in the shared transcript on both iPad and Windows.
 

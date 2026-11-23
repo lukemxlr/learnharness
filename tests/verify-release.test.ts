@@ -2,9 +2,9 @@
  * The final release gate (scripts/verify-release.ts) — pure-function tests
  * plus CLI end-to-end runs, all offline against fixtures. The expected asset
  * names asserted here are the ones verified against the INSTALLED
- * app-builder-lib 26.15.3 (see the script header for the derivation):
- * 11 assets — 4 installers (dmg / NSIS exe / AppImage / deb), the mac
- * updater ZIP, its/exe/dmg blockmaps, and the three latest*.yml feeds.
+ * app-builder-lib 26.x plus the prebuilt Linux server tarball step:
+ * 7 assets — 3 desktop installers (NSIS exe / AppImage / deb), the NSIS exe
+ * blockmap, the two latest*.yml feeds, and the Linux x64 server tarball.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -34,7 +34,7 @@ function asset(id: number, name: string, overrides: Partial<ReleaseAsset> = {}):
 	return { id, name, size: 5000, state: "uploaded", ...overrides };
 }
 
-/** The complete, healthy 11-asset draft for a version. */
+/** The complete, healthy 7-asset draft for a version. */
 function healthyRelease(version: string, tagForm: "v" | "bare" = "v"): ReleaseRecord {
 	const e = expectedAssets(version);
 	return {
@@ -45,7 +45,7 @@ function healthyRelease(version: string, tagForm: "v" | "bare" = "v"): ReleaseRe
 	};
 }
 
-/** The three update feeds exactly as app-builder-lib writes them. */
+/** The two update feeds exactly as app-builder-lib writes them. */
 function healthyFeeds(version: string, release: ReleaseRecord): Record<string, string> {
 	const byName = new Map(release.assets.map((entry) => [entry.name, entry]));
 	const feeds: Record<string, string> = {};
@@ -64,19 +64,15 @@ function healthyFeeds(version: string, release: ReleaseRecord): Record<string, s
 }
 
 describe("release gate — expected asset inventory", () => {
-	it("is exactly the 11 verified builder outputs for the version", () => {
+	it("is exactly the 7 verified builder and server outputs for the version", () => {
 		assert.deepEqual(expectedAssets(VERSION).files, [
-			"LearnHarness-0.2.0-arm64.dmg",
-			"LearnHarness-0.2.0-arm64-mac.zip",
 			"LearnHarness-0.2.0-x64-setup.exe",
 			"LearnHarness-0.2.0-x86_64.AppImage",
 			"LearnHarness-0.2.0-amd64.deb",
-			"LearnHarness-0.2.0-arm64.dmg.blockmap",
-			"LearnHarness-0.2.0-arm64-mac.zip.blockmap",
 			"LearnHarness-0.2.0-x64-setup.exe.blockmap",
-			"latest-mac.yml",
 			"latest.yml",
 			"latest-linux.yml",
+			"LearnHarness-0.2.0-server-linux-x64.tar.gz",
 		]);
 	});
 
@@ -160,10 +156,8 @@ describe("release gate — packaging-config drift guard", () => {
 	const drifts: Array<[string, (config: Record<string, unknown>) => void]> = [
 		["linux artifactName", (config) => { (config.linux as Record<string, unknown>).artifactName = "${name}-${version}-${arch}.${ext}"; }],
 		["win artifactName", (config) => { (config.win as Record<string, unknown>).artifactName = "${productName}-${version}-setup.${ext}"; }],
-		["mac artifactName", (config) => { (config.mac as Record<string, unknown>).artifactName = "${productName}-${version}.${ext}"; }],
 		["top-level artifactName", (config) => { config.artifactName = "${name}-${version}.${ext}"; }],
 		["productName", (config) => { config.productName = "learnharness"; }],
-		["mac targets", (config) => { (config.mac as Record<string, unknown>).target = [{ target: "dmg", arch: ["arm64"] }]; }],
 		["win target", (config) => { (config.win as Record<string, unknown>).target = [{ target: "appx", arch: ["x64"] }]; }],
 		["linux targets", (config) => { (config.linux as Record<string, unknown>).target = [{ target: "AppImage", arch: ["x64"] }]; }],
 		["publish provider", (config) => { config.publish = [{ provider: "github", releaseType: "prerelease" }]; }],
@@ -188,8 +182,8 @@ describe("release gate — asset inventory", () => {
 		release.assets = release.assets.filter((entry) => entry.name !== "LearnHarness-0.2.0-x64-setup.exe.blockmap");
 		release.assets.push(asset(9999, "LearnHarness-0.2.0-x64.AppImage"));
 		release.assets.push(asset(9998, "LearnHarness-0.1.0-x64-setup.exe"));
-		release.assets.push(asset(9997, "LearnHarness-0.2.0-arm64.dmg", { size: 0 }));
-		release.assets.push(asset(9996, "LearnHarness-0.2.0-arm64.dmg", { state: "starter" }));
+		release.assets.push(asset(9997, "LearnHarness-0.2.0-server-linux-x64.tar.gz", { size: 0 }));
+		release.assets.push(asset(9996, "LearnHarness-0.2.0-server-linux-x64.tar.gz", { state: "starter" }));
 		const verdict = verifyAssets(release, expectedAssets(VERSION));
 		assert.ok(!verdict.ok);
 		const joined = verdict.errors.join("\n");
@@ -263,19 +257,13 @@ describe("release gate — update feeds", () => {
 			feeds["latest.yml"] = feeds["latest.yml"]!.replace("size: 5000", "size: 4999");
 			void e;
 		}, /size 4999 ≠ release asset size 5000/],
-		["mac ZIP not first (legacy path/sha512 would mislead the updater)", (feeds) => {
+		["legacy path pointing away from files[0]", (feeds) => {
 			const e = expectedAssets(VERSION);
-			feeds["latest-mac.yml"] = feeds["latest-mac.yml"]!.replace(
-				`files:\n  - url: ${e.mac.zip}\n    sha512: ${sha512(e.mac.zip)}\n    size: 5000\n  - url: ${e.mac.dmg}\n    sha512: ${sha512(e.mac.dmg)}\n    size: 5000\n`,
-				`files:\n  - url: ${e.mac.dmg}\n    sha512: ${sha512(e.mac.dmg)}\n    size: 5000\n  - url: ${e.mac.zip}\n    sha512: ${sha512(e.mac.zip)}\n    size: 5000\n`,
-			).replace(`path: ${e.mac.zip}\nsha512: ${sha512(e.mac.zip)}\n`, `path: ${e.mac.dmg}\nsha512: ${sha512(e.mac.dmg)}\n`);
-		}, /files\[0\] must be/],
-		["mac legacy path pointing away from files[0]", (feeds) => {
-			const e = expectedAssets(VERSION);
-			feeds["latest-mac.yml"] = feeds["latest-mac.yml"]!.replace(`path: ${e.mac.zip}`, `path: ${e.mac.dmg}`);
+			feeds["latest-linux.yml"] = feeds["latest-linux.yml"]!.replace(`path: ${e.linux.appImage}`, `path: ${e.linux.deb}`);
 		}, /top-level path is/],
-		["mac legacy sha512 not matching files[0]", (feeds) => {
-			feeds["latest-mac.yml"] = feeds["latest-mac.yml"]!.replace(`sha512: ${sha512("LearnHarness-0.2.0-arm64-mac.zip")}\nreleaseDate`, `sha512: ${sha512("tampered")}\nreleaseDate`);
+		["legacy sha512 not matching files[0]", (feeds) => {
+			const e = expectedAssets(VERSION);
+			feeds["latest.yml"] = feeds["latest.yml"]!.replace(`sha512: ${sha512(e.win.exe)}\nreleaseDate`, `sha512: ${sha512("tampered")}\nreleaseDate`);
 		}, /top-level sha512 does not match/],
 		["missing deb entry in latest-linux.yml", (feeds) => {
 			const e = expectedAssets(VERSION);
@@ -285,7 +273,7 @@ describe("release gate — update feeds", () => {
 		}, /must reference exactly/],
 		["extra entry in latest.yml", (feeds) => {
 			const e = expectedAssets(VERSION);
-			feeds["latest.yml"] = feeds["latest.yml"]!.replace("path:", `  - url: ${e.mac.zip}\n    sha512: ${sha512(e.mac.zip)}\n    size: 5000\npath:`);
+			feeds["latest.yml"] = feeds["latest.yml"]!.replace("path:", `  - url: ${e.linux.appImage}\n    sha512: ${sha512(e.linux.appImage)}\n    size: 5000\npath:`);
 		}, /must reference exactly/],
 		["garbage sha512", (feeds) => {
 			const e = expectedAssets(VERSION);
@@ -322,7 +310,7 @@ describe("release gate — workflow wiring", () => {
 	});
 
 	it("exposes the elevated token only to the two API-reading steps", () => {
-		const readers = ["List every release, drafts included", "Download the three update feeds"];
+		const readers = ["List every release, drafts included", "Download the update feeds"];
 		for (const step of verify.steps) {
 			if (readers.includes(step.name)) assert.equal(step.env?.GH_TOKEN, "${{ github.token }}");
 			else assert.equal(step.env?.GH_TOKEN, undefined, String(step.name ?? step.uses));
@@ -354,10 +342,11 @@ describe("release gate — workflow wiring", () => {
 		}
 	});
 
-	it("download step fetches exactly the three update feeds from the selected draft", () => {
-		const download = verify.steps.find((step: any) => step.name === "Download the three update feeds");
+	it("download step fetches exactly the two active update feeds from the selected draft", () => {
+		const download = verify.steps.find((step: any) => step.name === "Download the update feeds");
 		assert.ok(download);
-		for (const feed of ["latest-mac.yml", "latest.yml", "latest-linux.yml"]) assert.ok(download.run.includes(feed));
+		for (const feed of ["latest.yml", "latest-linux.yml"]) assert.ok(download.run.includes(feed));
+		assert.equal(download.run.includes("latest-mac.yml"), false);
 		assert.match(download.run, /releases\/assets\/\$id/);
 	});
 });
@@ -408,23 +397,28 @@ describe("release gate — CLI (offline, repo config)", () => {
 		try {
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 0, String(result.stderr));
-			assert.match(result.stdout, /11\/11 expected files present/);
+			assert.match(result.stdout, /7\/7 expected files present/);
 			assert.ok(result.stdout.includes(`OK: draft for ${TAG} is complete`));
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
 	});
 
-	it("verify fails a draft with a missing blockmap and a stale asset", () => {
+	it("verify fails a draft with a missing blockmap, missing server tarball, and a stale asset", () => {
 		const { root } = workspace();
 		try {
 			const release = healthyRelease(VERSION);
-			release.assets = release.assets.filter((entry) => entry.name !== `LearnHarness-${VERSION}-arm64.dmg.blockmap`);
+			release.assets = release.assets.filter(
+				(entry) =>
+					entry.name !== `LearnHarness-${VERSION}-x64-setup.exe.blockmap` &&
+					entry.name !== `LearnHarness-${VERSION}-server-linux-x64.tar.gz`,
+			);
 			release.assets.push(asset(9999, "LearnHarness-0.1.0-x64-setup.exe"));
 			fs.writeFileSync(path.join(root, "releases.json"), JSON.stringify([release]));
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", TAG]);
 			assert.equal(result.status, 1);
-			assert.match(result.stderr, /arm64\.dmg\.blockmap: missing from the release/);
+			assert.match(result.stderr, /x64-setup\.exe\.blockmap: missing from the release/);
+			assert.match(result.stderr, /server-linux-x64\.tar\.gz: missing from the release/);
 			assert.match(result.stderr, /0\.1\.0-x64-setup\.exe: unexpected asset/);
 			assert.match(result.stderr, /do not publish/);
 		} finally {

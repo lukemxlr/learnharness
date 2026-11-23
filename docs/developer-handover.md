@@ -1,6 +1,6 @@
 # Developer Handover
 
-This document summarizes the architecture, key engineering decisions, module layout, on-disk data formats, Docker/E2E verification commands, tested viewports, and remaining open hardware/VM tasks for the `feat/lxc-server-ipad-draw-migration` extension branch.
+This document summarizes the architecture, key engineering decisions, module layout, on-disk data formats, Docker/E2E verification commands, and tested viewports for the self-hosted server, iPadOS Safari, Drawing Pad, and remote desktop extensions on `main`.
 
 ---
 
@@ -76,13 +76,22 @@ LearnHarness enforces strict unidirectional dependencies via `import/no-restrict
   - **Graph ledgers:** Deduplicated append-only union (`nodes.jsonl` by `id` + statements/aliases/provenance; `chains.jsonl` by sorted `premises>conclusion` + provenance; `sessions.jsonl` by `chatId + foldedAt`; `coverage.jsonl` by `chatId + fp` keeping newest `foldedAt`; `sources.json` merges `extractions` and keeps newer `importedAt`; `positions.json` uses `updatedAt` precedence). Legacy `edges.jsonl` / `events.jsonl` are diagnosed without polluting target writes.
   - **Settings:** On non-`win32` targets, `sanitizeFileAccessSettingsForPlatform` strips Windows drive/UNC folders from `agent.fileAccess.folders` while preserving `restricted`, and preserves newer server `settings.json` (`preserve_server`).
 
-### 1.8 Overhauled Drawing Pad & `PluginFrontendContext` Staging
+### 1.8 Overhauled Drawing Pad, iPadOS Overscroll Lock & `PluginFrontendContext` Staging
 
-- **Files:** [`plugins/drawing-pad/README.md`](../plugins/drawing-pad/README.md), [`plugins/drawing-pad/src/{main,sheet,state,strokes,theme,geometry,capture,reference,settings,backend}.ts`](../plugins/drawing-pad/src/main.ts), [`components/plugin-surface-targets.ts`](../components/plugin-surface-targets.ts), [`components/chat.tsx`](../components/chat.tsx), [`components/question-dock.tsx`](../components/question-dock.tsx), [`components/practice-dock.tsx`](../components/practice-dock.tsx).
+- **Files:** [`plugins/drawing-pad/README.md`](../plugins/drawing-pad/README.md), [`plugins/drawing-pad/src/{main,sheet,state,strokes,theme,geometry,capture,reference,settings,backend}.ts`](../plugins/drawing-pad/src/main.ts), [`components/plugin-surface-targets.ts`](../components/plugin-surface-targets.ts), [`components/chat.tsx`](../components/chat.tsx), [`components/question-dock.tsx`](../components/question-dock.tsx), [`components/practice-dock.tsx`](../components/practice-dock.tsx), [`app/globals.css`](../app/globals.css), [`app/layout.tsx`](../app/layout.tsx).
 - **Decisions:**
   - `registerSurfaceStaging` binds a `WeakMap<PluginSurfaceTarget, handler>` in `components/plugin-surface-targets.ts` so `stageSubmissionImage` stages PNG bytes through host `POST /api/attachments` into the active composer, question dock, or practice dock without auto-sending a turn.
-  - `plugins/drawing-pad` provides `mouse`/`touch`/`pen` parity (`touch-action: none`, secondary-touch rejection), `Karoraster` grid overlay, colors, widths (`2`–`16` px), Undo/Redo, independent `Light`/`Dark`/`App` paper theme with monochrome ink legibility adaptation (`resolveStrokeColor`), cropped opaque PNG export (`imageScale` before `2000 × 2000` cap), and `localStorage` drafts keyed by `(sessionId, questionKey)` (`MAX_PERSISTED_DRAFTS = 24`).
+  - `plugins/drawing-pad` provides `mouse`/`touch`/`pen` parity (`touch-action: none`), **Option A palm rejection** (rejecting large touch contacts `>= 24px`, prioritizing Apple Pencil over concurrent palm touches, and auto-enabling a per-device persisted **Stylus-only** toggle upon first pen contact), **2-finger pinch-zoom (`0.5x`–`4.0x`) & 2-finger pan** without stray strokes (plus zoom reset button and desktop wheel pan/zoom), `Karoraster` grid overlay, colors, widths (`2`–`16` px), Undo/Redo, independent `Light`/`Dark`/`App` paper theme with monochrome ink legibility adaptation (`resolveStrokeColor`), zoom-independent cropped opaque PNG export (`imageScale` before `2000 × 2000` cap), and `localStorage` drafts keyed by `(sessionId, questionKey)` (`MAX_PERSISTED_DRAFTS = 24`).
+  - `app/globals.css` and `app/layout.tsx` lock outer viewport overscroll (`overscroll-behavior: none`, `overflow: hidden`) so iPadOS rubber-banding does not pull the shell, while keeping `[role="log"] > div` and `.lh-overlay-scroll` smoothly scrollable.
   - **Core plugin default:** Core plugins start disabled by default (`tests/core-plugins.test.ts`); automated/E2E runs testing Drawing Pad must enable `drawing-pad` via `plugins-state.json` or `PUT /api/plugins/drawing-pad`.
+
+### 1.9 Non-Secure LAN HTTP Compatibility (`src/core/uuid.ts`)
+
+- **Files:** [`src/core/uuid.ts`](../src/core/uuid.ts), [`components/session-core.ts`](../components/session-core.ts), [`components/settings/chatgpt-connection.tsx`](../components/settings/chatgpt-connection.tsx), [`components/dictation.tsx`](../components/dictation.tsx), [`tests/insecure-context-browser.test.tsx`](../tests/insecure-context-browser.test.tsx).
+- **Decisions:**
+  - Plain LAN HTTP (`http://<lan-ip>:3000`) lacks `crypto.randomUUID`, `navigator.clipboard`, and `navigator.mediaDevices.getUserMedia`.
+  - `randomUuid()` in `src/core/uuid.ts` falls back to RFC-4122 v4 generation via `crypto.getRandomValues` (or deterministic CSPRNG/Math fallback) across messages, side chats, coding questions, and flashcards.
+  - `chatgpt-connection.tsx` falls back to `document.execCommand("copy")` when `navigator.clipboard` is unavailable, and `dictation.tsx` detects missing `getUserMedia` cleanly with `DICTATION_INSECURE_CONTEXT` (`"Dictation requires HTTPS"`).
 
 ---
 

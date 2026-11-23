@@ -30,3 +30,6 @@ xai-credentials.json*
 
 # dev-fresh launcher scratch (fresh-user sim): disposable per launch
 .fresh-data/
+
+# Local Graphify code knowledge graph (regenerated via `graphify update .`)
+graphify-out/
