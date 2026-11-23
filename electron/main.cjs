@@ -53,14 +53,22 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
 const SERVER_SETUP_DOCS_URL = "https://github.com/lukemxlr/learnharness/blob/main/docs/setup-and-operation.md";
-const APP_VERSION = (() => {
+function getAppVersion() {
 	try {
-		const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+		if (typeof app.getVersion === "function") {
+			const v = app.getVersion();
+			if (typeof v === "string" && v.trim()) return v.trim();
+		}
+	} catch {
+		/* fallback to package.json */
+	}
+	try {
+		const pkg = require("../package.json");
 		return typeof pkg?.version === "string" ? pkg.version : "";
 	} catch {
 		return "";
 	}
-})();
+}
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
 // renderer owns the number; this is the IPC widen target).
@@ -1326,7 +1334,7 @@ async function main() {
 		if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
 			throw new Error("Untrusted desktop request.");
 		}
-		return APP_VERSION;
+		return getAppVersion();
 	});
 
 	if (!devUrl) {
