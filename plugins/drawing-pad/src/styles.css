@@ -82,6 +82,16 @@
   color: #ffffff;
 }
 
+.drawing-pad-zoom-btn {
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+}
+
+.drawing-pad-zoom-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .drawing-pad-theme-group {
   display: inline-flex;
   align-items: center;

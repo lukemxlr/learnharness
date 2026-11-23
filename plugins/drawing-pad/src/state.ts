@@ -1,4 +1,5 @@
 import type { PluginSessionViewInput, PluginSubmissionTarget } from "learnharness-plugin-api";
+import { clampZoom, DEFAULT_ZOOM } from "./geometry.ts";
 import { occurrenceKey } from "./poses.ts";
 import { DEFAULT_DARK_INK_COLOR, DEFAULT_IMAGE_SCALE, DEFAULT_LIGHT_INK_COLOR } from "./settings.ts";
 import type { Reference } from "./reference.ts";
@@ -23,6 +24,7 @@ export interface Draft {
   paperTheme: PaperTheme;
   grid: boolean;
   pan: { x: number; y: number };
+  zoom: number;
   pixelRatio: number;
   hasInk: boolean;
   reference?: Reference;
@@ -37,6 +39,7 @@ export interface SessionSheet {
   tool: Tool;
   penColor: string;
   strokeWidth: number;
+  stylusOnly: boolean;
   readonly seenPoses: Set<string>;
   readTicket: number;
 }
@@ -58,11 +61,33 @@ interface PersistedDraft {
   paperTheme: PaperTheme;
   grid: boolean;
   pan: { x: number; y: number };
+  zoom?: number;
   updatedAt: number;
 }
 
 const DRAFT_STORAGE_PREFIX = "lh:drawing-pad:draft:v1:";
+const STYLUS_ONLY_STORAGE_KEY = "lh:drawing-pad:stylus-only:v1";
 const MAX_PERSISTED_DRAFTS = 24;
+
+function loadStylusOnlyPreference(): boolean {
+  const storage = getStorage();
+  if (!storage) return false;
+  try {
+    return storage.getItem(STYLUS_ONLY_STORAGE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveStylusOnlyPreference(enabled: boolean): void {
+  const storage = getStorage();
+  if (!storage) return;
+  try {
+    storage.setItem(STYLUS_ONLY_STORAGE_KEY, enabled ? "1" : "0");
+  } catch {
+    // Ignore storage restriction errors.
+  }
+}
 
 export function draftStorageKey(sessionId: string, questionKey: string): string {
   return `${DRAFT_STORAGE_PREFIX}${sessionId}:${questionKey}`;
@@ -132,6 +157,7 @@ function parsePersistedDraft(raw: string | null): PersistedDraft | undefined {
     if (typeof parsed.grid !== "boolean") return undefined;
     const pan = parsed.pan as Record<string, unknown> | undefined;
     if (!pan || typeof pan.x !== "number" || !Number.isFinite(pan.x) || typeof pan.y !== "number" || !Number.isFinite(pan.y)) return undefined;
+    const zoom = typeof parsed.zoom === "number" && Number.isFinite(parsed.zoom) ? clampZoom(parsed.zoom) : DEFAULT_ZOOM;
     const updatedAt = typeof parsed.updatedAt === "number" && Number.isFinite(parsed.updatedAt) ? parsed.updatedAt : 0;
     return {
       version: 1,
@@ -140,6 +166,7 @@ function parsePersistedDraft(raw: string | null): PersistedDraft | undefined {
       paperTheme: parsed.paperTheme,
       grid: parsed.grid,
       pan: { x: pan.x, y: pan.y },
+      zoom,
       updatedAt,
     };
   } catch {
@@ -147,13 +174,14 @@ function parsePersistedDraft(raw: string | null): PersistedDraft | undefined {
   }
 }
 
-function hasMeaningfulState(draft: Pick<Draft, "strokes" | "redoStack" | "paperTheme" | "grid" | "pan">): boolean {
+function hasMeaningfulState(draft: Pick<Draft, "strokes" | "redoStack" | "paperTheme" | "grid" | "pan" | "zoom">): boolean {
   return draft.strokes.length > 0 ||
     draft.redoStack.length > 0 ||
     draft.paperTheme !== "app" ||
     draft.grid ||
     draft.pan.x !== 0 ||
-    draft.pan.y !== 0;
+    draft.pan.y !== 0 ||
+    draft.zoom !== DEFAULT_ZOOM;
 }
 
 function savePersistedDraft(draft: Draft): void {
@@ -172,6 +200,7 @@ function savePersistedDraft(draft: Draft): void {
       paperTheme: draft.paperTheme,
       grid: draft.grid,
       pan: draft.pan,
+      zoom: draft.zoom,
       updatedAt: Date.now(),
     };
     storage.setItem(key, JSON.stringify(payload));
@@ -254,6 +283,7 @@ export class Sheets {
         tool: "pen",
         penColor: "auto",
         strokeWidth: DEFAULT_STROKE_WIDTH,
+        stylusOnly: loadStylusOnlyPreference(),
         seenPoses: new Set(),
         readTicket: 0,
       };
@@ -283,6 +313,7 @@ export class Sheets {
       paperTheme: persisted?.paperTheme ?? "app",
       grid: persisted?.grid ?? false,
       pan: persisted?.pan ?? { x: 0, y: 0 },
+      zoom: clampZoom(persisted?.zoom ?? DEFAULT_ZOOM),
       pixelRatio,
       hasInk: visibleStrokes(strokes).length > 0,
       reference,
@@ -360,6 +391,7 @@ export class Sheets {
       strokes: [],
       redoStack: [],
       pan: { x: 0, y: 0 },
+      zoom: DEFAULT_ZOOM,
       hasInk: false,
     };
     state.drafts.set(draft.questionKey, next);
@@ -393,6 +425,22 @@ export class Sheets {
     state.drafts.set(draft.questionKey, next);
     savePersistedDraft(next);
     this.publish("camera");
+  }
+
+  setCamera(state: SessionSheet, draft: Draft, pan: { x: number; y: number }, zoom: number): void {
+    const current = state.drafts.get(draft.questionKey);
+    if (!current) return;
+    const next: Draft = { ...current, pan, zoom: clampZoom(zoom) };
+    state.drafts.set(draft.questionKey, next);
+    savePersistedDraft(next);
+    this.publish("camera");
+  }
+
+  setStylusOnly(state: SessionSheet, enabled: boolean, persist = true): void {
+    if (persist) saveStylusOnlyPreference(enabled);
+    if (state.stylusOnly === enabled) return;
+    state.stylusOnly = enabled;
+    this.publish("tool");
   }
 
   setTool(state: SessionSheet, tool: Tool): void {

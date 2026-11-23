@@ -56,7 +56,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 			style={vars as React.CSSProperties}
 			suppressHydrationWarning
 		>
-			<body className="min-h-dvh antialiased">
+			<body className="fixed inset-0 h-dvh w-full overflow-hidden overscroll-none antialiased">
 				{shellActive ? (
 					<>
 						{/* The notification channel rides OUTSIDE everything: sidebar, dock,

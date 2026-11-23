@@ -378,3 +378,89 @@ it("keeps surface open with inline error and preserves local draft if stageSubmi
     mounted.dispose();
   }),
 );
+
+it("enforces Option A palm rejection (Stylus-only auto-lock, pen wins over resting palm, 2-finger pinch-zoom + pan without stray lines, wheel pan/zoom, zoom-independent export)", () =>
+  withFakeDom(async ({ rootEl, markdownCalls }) => {
+    const sheets = new Sheets(() => {}, () => {});
+    const state = sheets.session("s-ipad", "teaching");
+    const controller = new AbortController();
+    const input = { type: "text" } as unknown as PluginSessionViewInput;
+
+    const mounted = mountSheet(rootEl as unknown as HTMLElement, fakeCtx(markdownCalls), sheets, state, "composer", input, controller.signal, async () => {});
+    const inkCanvas = rootEl.querySelector("canvas.drawing-pad-ink")!;
+    const viewport = rootEl.querySelector(".drawing-pad-viewport")!;
+    const stylusBtn = rootEl.querySelector('[aria-label="Stylus only"]')!;
+    const zoomBtn = rootEl.querySelector('[aria-label="Reset zoom"]')!;
+
+    assert.equal(stylusBtn.getAttribute("aria-pressed"), "false");
+    assert.equal(zoomBtn.textContent, "100%");
+    assert.equal(zoomBtn.disabled, true);
+
+    // 1. Large palm-sized touch contact (>=24px) is immediately ignored without drawing
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 10, pointerType: "touch", isPrimary: true, width: 42, height: 38, button: 0, buttons: 1, pressure: 0.5, clientX: 200, clientY: 200 });
+    inkCanvas.dispatchEvent({ type: "pointermove", pointerId: 10, pointerType: "touch", isPrimary: true, width: 42, height: 38, buttons: 1, pressure: 0.5, clientX: 260, clientY: 220 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 10, pointerType: "touch", isPrimary: true, width: 42, height: 38, button: 0, buttons: 0, pressure: 0, clientX: 260, clientY: 220 });
+    assert.equal(state.drafts.get("composer")!.strokes.length, 0);
+
+    // 2. Resting touch arrives first, then Apple Pencil lands -> touch stroke discarded, pen wins & auto-enables Stylus-only
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 11, pointerType: "touch", isPrimary: true, width: 10, height: 10, button: 0, buttons: 1, pressure: 0.5, clientX: 300, clientY: 300 });
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 12, pointerType: "pen", isPrimary: true, width: 1, height: 1, button: 0, buttons: 1, pressure: 0.7, clientX: 100, clientY: 120 });
+    inkCanvas.dispatchEvent({ type: "pointermove", pointerId: 12, pointerType: "pen", isPrimary: true, buttons: 1, pressure: 0.7, clientX: 220, clientY: 120 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 12, pointerType: "pen", isPrimary: true, button: 0, buttons: 0, pressure: 0, clientX: 220, clientY: 120 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 11, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, pressure: 0, clientX: 300, clientY: 300 });
+    assert.equal(state.stylusOnly, true);
+    assert.equal(stylusBtn.getAttribute("aria-pressed"), "true");
+    assert.equal(state.drafts.get("composer")!.strokes.length, 1, "only the Apple Pencil stroke commits; resting touch is discarded");
+
+    // 3. Option A: with Stylus-only active, single-finger touch neither draws nor pans
+    const panBeforeSingleTouch = { ...state.drafts.get("composer")!.pan };
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 13, pointerType: "touch", isPrimary: true, width: 10, height: 10, button: 0, buttons: 1, pressure: 0.5, clientX: 150, clientY: 150 });
+    inkCanvas.dispatchEvent({ type: "pointermove", pointerId: 13, pointerType: "touch", isPrimary: true, width: 10, height: 10, buttons: 1, pressure: 0.5, clientX: 250, clientY: 250 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 13, pointerType: "touch", isPrimary: true, width: 10, height: 10, button: 0, buttons: 0, pressure: 0, clientX: 250, clientY: 250 });
+    assert.equal(state.drafts.get("composer")!.strokes.length, 1);
+    assert.deepEqual(state.drafts.get("composer")!.pan, panBeforeSingleTouch);
+
+    // 4. 2-finger pinch-zoom + 2-finger pan works in Pen mode without drawing any stray line!
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 20, pointerType: "touch", isPrimary: true, width: 10, height: 10, button: 0, buttons: 1, pressure: 0.5, clientX: 250, clientY: 250 });
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 21, pointerType: "touch", isPrimary: false, width: 10, height: 10, button: 0, buttons: 1, pressure: 0.5, clientX: 350, clientY: 250 });
+    // Spread fingers from distance 100 -> 200 and shift midpoint up by 40px
+    inkCanvas.dispatchEvent({ type: "pointermove", pointerId: 20, pointerType: "touch", isPrimary: true, width: 10, height: 10, buttons: 1, pressure: 0.5, clientX: 200, clientY: 210 });
+    inkCanvas.dispatchEvent({ type: "pointermove", pointerId: 21, pointerType: "touch", isPrimary: false, width: 10, height: 10, buttons: 1, pressure: 0.5, clientX: 400, clientY: 210 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 20, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, pressure: 0, clientX: 200, clientY: 210 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 21, pointerType: "touch", isPrimary: false, button: 0, buttons: 0, pressure: 0, clientX: 400, clientY: 210 });
+
+    const zoomedDraft = state.drafts.get("composer")!;
+    assert.equal(zoomedDraft.strokes.length, 1, "2-finger pinch must never draw a line");
+    assert.ok(Math.abs(zoomedDraft.zoom - 2) < 0.05, `expected ~2x zoom, got ${zoomedDraft.zoom}`);
+    assert.equal(zoomBtn.textContent, "200%");
+    assert.equal(zoomBtn.disabled, false);
+
+    // 5. Export stays completely camera- and zoom-independent
+    const exportAt2x = await exportSheet(sheets.capture(state, "composer")!, controller.signal);
+    zoomBtn.click();
+    const resetDraft = state.drafts.get("composer")!;
+    assert.equal(resetDraft.zoom, 1);
+    assert.deepEqual(resetDraft.pan, { x: 0, y: 0 });
+    assert.equal(zoomBtn.textContent, "100%");
+    assert.equal(zoomBtn.disabled, true);
+    const exportAt1x = await exportSheet(sheets.capture(state, "composer")!, controller.signal);
+    assert.equal(exportAt2x.data, exportAt1x.data, "PNG export must not depend on zoom or pan");
+
+    // 6. Desktop wheel pans, Ctrl+wheel zooms
+    viewport.dispatchEvent({ type: "wheel", deltaX: 0, deltaY: 60, ctrlKey: false, metaKey: false, clientX: 300, clientY: 250 });
+    assert.equal(state.drafts.get("composer")!.pan.y, -60);
+    viewport.dispatchEvent({ type: "wheel", deltaX: 0, deltaY: -120, ctrlKey: true, metaKey: false, clientX: 300, clientY: 250 });
+    assert.ok(state.drafts.get("composer")!.zoom > 1.2);
+
+    // 7. Turning Stylus-only OFF restores single-finger drawing, while rapid 2nd finger still cancels stray dot into pinch
+    stylusBtn.click();
+    assert.equal(state.stylusOnly, false);
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 30, pointerType: "touch", isPrimary: true, width: 10, height: 10, button: 0, buttons: 1, pressure: 0.5, clientX: 250, clientY: 250 });
+    inkCanvas.dispatchEvent({ type: "pointerdown", pointerId: 31, pointerType: "touch", isPrimary: false, width: 10, height: 10, button: 0, buttons: 1, pressure: 0.5, clientX: 350, clientY: 250 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 30, pointerType: "touch", isPrimary: true, button: 0, buttons: 0, pressure: 0, clientX: 250, clientY: 250 });
+    inkCanvas.dispatchEvent({ type: "pointerup", pointerId: 31, pointerType: "touch", isPrimary: false, button: 0, buttons: 0, pressure: 0, clientX: 350, clientY: 250 });
+    assert.equal(state.drafts.get("composer")!.strokes.length, 1, "rapid 2-finger pinch cancels finger-1 stray dot even when Stylus-only is off");
+
+    mounted.dispose();
+  }),
+);

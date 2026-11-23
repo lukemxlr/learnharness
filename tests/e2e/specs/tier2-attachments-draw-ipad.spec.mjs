@@ -750,9 +750,11 @@ test.describe("Tier 2 — F11: iPad Edge Responsive & Keyboard Interaction Cases
 				}
 			});
 
+			// Allow scroll-back auto-expand to settle before checking if collapsed bar remains visible
+			await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 			const bar = page.getByTestId("question-dock-bar");
 			if (await bar.isVisible().catch(() => false)) {
-				await bar.click();
+				await bar.click({ timeout: 3_000 }).catch(() => {});
 			}
 			await expect(page.getByRole("radio").nth(1)).toHaveAttribute("aria-checked", "true");
 			await expect(mcInput).toContainText("Draft retained across collapse scroll");

@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { exportBounds, exportRaster, inkBounds, referenceBounds, viewOrigin } from "../src/geometry.ts";
+import {
+  clampZoom,
+  exportBounds,
+  exportRaster,
+  inkBounds,
+  pinchCamera,
+  referenceBounds,
+  screenToWorld,
+  viewOrigin,
+  zoomAroundAnchor,
+} from "../src/geometry.ts";
 import type { Stroke } from "../src/strokes.ts";
 
 const pen = (x: number, y: number, pressure = 0.5, width?: number): Stroke => ({
@@ -70,4 +80,38 @@ it("erased distant strokes do not expand the crop and Undo restores their bounds
   assert.ok(exportBounds(0, 0, [far, near])!.width > 100000);
   assert.equal(exportBounds(600, 200, [far, erase]), undefined);
   assert.equal(inkBounds([]), undefined);
+});
+
+it("clamps zoom, converts screen-to-world coordinates, and preserves anchor points under zoom and 2-finger pinch", () => {
+  assert.equal(clampZoom(0.1), 0.5);
+  assert.equal(clampZoom(10), 4);
+  assert.equal(clampZoom(NaN), 1);
+  assert.equal(clampZoom(2.25), 2.25);
+
+  const origin = viewOrigin(800, 600, { x: 40, y: -20 });
+  assert.deepEqual(screenToWorld(origin.x + 100, origin.y - 50, origin, 2), { x: 50, y: -25 });
+
+  // Zoom around anchor (600, 450) from 1x -> 2x keeps the world point under (600, 450) fixed
+  const beforeWorld = screenToWorld(600, 450, viewOrigin(800, 600, { x: 20, y: -10 }), 1);
+  const zoomed = zoomAroundAnchor(800, 600, { x: 20, y: -10 }, 1, 2, 600, 450);
+  assert.equal(zoomed.zoom, 2);
+  const afterWorld = screenToWorld(600, 450, viewOrigin(800, 600, zoomed.pan), zoomed.zoom);
+  assert.ok(Math.abs(afterWorld.x - beforeWorld.x) < 1e-9);
+  assert.ok(Math.abs(afterWorld.y - beforeWorld.y) < 1e-9);
+
+  // Pure 2-finger pan (equal distance) shifts pan 1:1
+  const panned = pinchCamera(800, 600, { x: 10, y: 20 }, 1.5, { x: 200, y: 200 }, 100, { x: 240, y: 150 }, 100);
+  assert.equal(panned.zoom, 1.5);
+  assert.ok(Math.abs(panned.pan.x - 50) < 1e-9);
+  assert.ok(Math.abs(panned.pan.y - -30) < 1e-9);
+
+  // Simultaneous 2-finger pinch-zoom + pan keeps startMid's world point glued to currentMid
+  const startMid = { x: 300, y: 250 };
+  const curMid = { x: 360, y: 210 };
+  const worldUnderStart = screenToWorld(startMid.x, startMid.y, viewOrigin(800, 600, { x: -30, y: 15 }), 1);
+  const pinched = pinchCamera(800, 600, { x: -30, y: 15 }, 1, startMid, 100, curMid, 200);
+  assert.equal(pinched.zoom, 2);
+  const worldUnderCur = screenToWorld(curMid.x, curMid.y, viewOrigin(800, 600, pinched.pan), pinched.zoom);
+  assert.ok(Math.abs(worldUnderCur.x - worldUnderStart.x) < 1e-9);
+  assert.ok(Math.abs(worldUnderCur.y - worldUnderStart.y) < 1e-9);
 });

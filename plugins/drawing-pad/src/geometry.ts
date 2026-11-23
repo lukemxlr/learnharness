@@ -3,6 +3,73 @@ import { DEFAULT_STROKE_WIDTH, strokeWidth, visibleStrokes, type Stroke } from "
 export interface Offset { x: number; y: number }
 export interface Bounds extends Offset { width: number; height: number }
 
+export const MIN_ZOOM = 0.5;
+export const MAX_ZOOM = 4;
+export const DEFAULT_ZOOM = 1;
+
+export function clampZoom(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_ZOOM;
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
+}
+
+export function screenToWorld(offsetX: number, offsetY: number, origin: Offset, zoom = DEFAULT_ZOOM): Offset {
+  const scale = clampZoom(zoom);
+  return {
+    x: (offsetX - origin.x) / scale,
+    y: (offsetY - origin.y) / scale,
+  };
+}
+
+/** Zoom the display camera while keeping the world point under (anchorX, anchorY) fixed on screen. */
+export function zoomAroundAnchor(
+  width: number,
+  height: number,
+  pan: Offset,
+  currentZoom: number,
+  nextZoom: number,
+  anchorX: number,
+  anchorY: number,
+): { pan: Offset; zoom: number } {
+  const z1 = clampZoom(currentZoom);
+  const z2 = clampZoom(nextZoom);
+  const origin = viewOrigin(width, height, pan, 0);
+  const wx = (anchorX - origin.x) / z1;
+  const wy = (anchorY - origin.y) / z1;
+  return {
+    zoom: z2,
+    pan: {
+      x: anchorX - width / 2 - wx * z2,
+      y: anchorY - height / 2 - wy * z2,
+    },
+  };
+}
+
+/** Simultaneous 2-finger pinch-zoom + pan: keeps the world point under startMid glued to currentMid. */
+export function pinchCamera(
+  width: number,
+  height: number,
+  startPan: Offset,
+  startZoom: number,
+  startMid: Offset,
+  startDist: number,
+  currentMid: Offset,
+  currentDist: number,
+): { pan: Offset; zoom: number } {
+  const z1 = clampZoom(startZoom);
+  const ratio = startDist > 0 && currentDist > 0 ? currentDist / startDist : 1;
+  const z2 = clampZoom(z1 * ratio);
+  const startOrigin = viewOrigin(width, height, startPan, 0);
+  const wx = (startMid.x - startOrigin.x) / z1;
+  const wy = (startMid.y - startOrigin.y) / z1;
+  return {
+    zoom: z2,
+    pan: {
+      x: currentMid.x - width / 2 - wx * z2,
+      y: currentMid.y - height / 2 - wy * z2,
+    },
+  };
+}
+
 /** Bound only the export raster, never world geometry or the display camera. */
 export function exportRaster(bounds: Bounds, pixelRatio: number, imageScale: number): { width: number; height: number } {
   if (![bounds.x, bounds.y, bounds.width, bounds.height, pixelRatio, imageScale].every(Number.isFinite) ||

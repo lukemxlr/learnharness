@@ -469,7 +469,7 @@ describe("M5 iPadOS / WebKit UI & Responsive Primitives", () => {
 			assert.ok(searchInput, "session-search input rendered");
 			assert.equal(searchInput.getAttribute("placeholder"), null, "must avoid native HTML placeholder on persistent sidebar search");
 			assert.equal(searchInput.getAttribute("aria-placeholder"), "Search…");
-			const shell = document.querySelector(".overflow-x-clip");
+			const shell = document.querySelector(".overscroll-none");
 			assert.ok(shell && !shell.className.includes("transition-[width"), "no slide-in transition before first paint frame");
 			assert.ok(rafCb, "deferred mount transition scheduled via requestAnimationFrame");
 			await act(async () => {
@@ -480,5 +480,16 @@ describe("M5 iPadOS / WebKit UI & Responsive Primitives", () => {
 			globalThis.requestAnimationFrame = origRaf;
 			globalThis.cancelAnimationFrame = origCaf;
 		}
+	});
+
+	it("locks html/body against iPadOS document rubber-banding while containing inner scrollers", async () => {
+		const fs = await import("node:fs");
+		const path = await import("node:path");
+		const globalsCss = fs.readFileSync(path.resolve("app/globals.css"), "utf8");
+		const layoutTsx = fs.readFileSync(path.resolve("app/layout.tsx"), "utf8");
+		assert.match(globalsCss, /html\s*\{[^}]*overflow:\s*hidden;[^}]*overscroll-behavior:\s*none;/s);
+		assert.match(globalsCss, /body\s*\{[^}]*position:\s*fixed;[^}]*overflow:\s*hidden;[^}]*overscroll-behavior:\s*none;/s);
+		assert.match(globalsCss, /\[role="log"\]\s*>\s*div\s*\{[^}]*overscroll-behavior-y:\s*contain;/s);
+		assert.match(layoutTsx, /<body[^>]*overflow-hidden[^>]*overscroll-none/);
 	});
 });

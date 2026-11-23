@@ -260,20 +260,24 @@ export function paintInk(
   strokes: readonly Stroke[],
   paper: ResolvedPaper,
   origin: { x: number; y: number } = { x: 0, y: 0 },
+  zoom = 1,
 ): void {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Could not create the drawing canvas.");
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const sx = canvas.width / width;
+  const sy = canvas.height / height;
   context.resetTransform();
   context.globalCompositeOperation = "source-over";
   context.fillStyle = paper.backgroundColor;
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.setTransform(
-    canvas.width / width,
+    sx * scale,
     0,
     0,
-    canvas.height / height,
-    origin.x * canvas.width / width,
-    origin.y * canvas.height / height,
+    sy * scale,
+    origin.x * sx,
+    origin.y * sy,
   );
   for (const stroke of visibleStrokes(strokes)) {
     paintStroke(context, stroke, resolveStrokeColor(stroke.color, paper));
@@ -287,18 +291,22 @@ export function paintInkTransparent(
   strokes: readonly Stroke[],
   paper: ResolvedPaper,
   origin: { x: number; y: number } = { x: 0, y: 0 },
+  zoom = 1,
 ): void {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Could not create the drawing canvas.");
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const sx = canvas.width / width;
+  const sy = canvas.height / height;
   context.resetTransform();
   context.clearRect(0, 0, canvas.width, canvas.height);
   context.setTransform(
-    canvas.width / width,
+    sx * scale,
     0,
     0,
-    canvas.height / height,
-    origin.x * canvas.width / width,
-    origin.y * canvas.height / height,
+    sy * scale,
+    origin.x * sx,
+    origin.y * sy,
   );
   for (const stroke of visibleStrokes(strokes)) {
     paintStroke(context, stroke, resolveStrokeColor(stroke.color, paper));
@@ -312,12 +320,13 @@ export function paintGrid(
   color: string,
   origin: { x: number; y: number } = { x: 0, y: 0 },
   spacing = 24,
+  zoom = 1,
 ): void {
   const context = canvas.getContext("2d");
   if (!context) return;
   context.resetTransform();
   context.clearRect(0, 0, canvas.width, canvas.height);
-  drawGridLines(context, canvas.width, canvas.height, width, height, color, origin, spacing);
+  drawGridLines(context, canvas.width, canvas.height, width, height, color, origin, spacing, zoom);
 }
 
 export function drawGridLines(
@@ -329,8 +338,11 @@ export function drawGridLines(
   color: string,
   origin: { x: number; y: number },
   spacing = 24,
+  zoom = 1,
 ): void {
-  if (cssWidth <= 0 || cssHeight <= 0 || spacing <= 0) return;
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const step = spacing * scale;
+  if (cssWidth <= 0 || cssHeight <= 0 || step <= 0) return;
   const sx = pixelWidth / cssWidth;
   const sy = pixelHeight / cssHeight;
   context.save();
@@ -338,14 +350,14 @@ export function drawGridLines(
   context.strokeStyle = color;
   context.lineWidth = 1;
   context.beginPath();
-  const offsetX = ((origin.x % spacing) + spacing) % spacing;
-  const offsetY = ((origin.y % spacing) + spacing) % spacing;
-  for (let x = offsetX; x <= cssWidth; x += spacing) {
+  const offsetX = ((origin.x % step) + step) % step;
+  const offsetY = ((origin.y % step) + step) % step;
+  for (let x = offsetX; x <= cssWidth; x += step) {
     const aligned = Math.round(x) + 0.5;
     context.moveTo(aligned, 0);
     context.lineTo(aligned, cssHeight);
   }
-  for (let y = offsetY; y <= cssHeight; y += spacing) {
+  for (let y = offsetY; y <= cssHeight; y += step) {
     const aligned = Math.round(y) + 0.5;
     context.moveTo(0, aligned);
     context.lineTo(cssWidth, aligned);

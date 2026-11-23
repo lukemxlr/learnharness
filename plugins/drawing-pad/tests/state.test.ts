@@ -173,3 +173,37 @@ it("publishes granular change reasons for sheet, ink, camera, and tool updates",
   sheets.setPaperTheme(state, state.drafts.get("q1")!, "light");
   assert.deepEqual(reasons, ["sheet", "ink", "camera", "tool", "ink", "ink", "sheet"]);
 }));
+
+it("persists camera zoom, stylus-only preference, and recovers legacy v1 drafts without zoom", () => withMockStorage((store) => {
+  // Legacy v1 draft lacking `zoom` field still loads cleanly at 1x
+  store.set(
+    draftStorageKey("s-legacy", "q1"),
+    JSON.stringify({
+      version: 1,
+      strokes: [stroke(12)],
+      redoStack: [],
+      paperTheme: "light",
+      grid: true,
+      pan: { x: 10, y: -20 },
+      updatedAt: 1000,
+    }),
+  );
+  const sheets1 = new Sheets(() => {}, () => {});
+  const s1 = sheets1.session("s-legacy", "teaching");
+  const legacy = sheets1.openDraft(s1, "q1", 2);
+  assert.equal(legacy.zoom, 1);
+
+  sheets1.setCamera(s1, legacy, { x: -50, y: 80 }, 2.25);
+  sheets1.setStylusOnly(s1, true, true);
+
+  const sheets2 = new Sheets(() => {}, () => {});
+  const s2 = sheets2.session("s-legacy", "teaching");
+  assert.equal(s2.stylusOnly, true);
+  const restored = sheets2.openDraft(s2, "q1", 2);
+  assert.equal(restored.zoom, 2.25);
+  assert.deepEqual(restored.pan, { x: -50, y: 80 });
+
+  sheets2.clear(s2, restored);
+  assert.equal(s2.drafts.get("q1")!.zoom, 1);
+  assert.deepEqual(s2.drafts.get("q1")!.pan, { x: 0, y: 0 });
+}));

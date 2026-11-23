@@ -1,7 +1,7 @@
 import type { PluginFrontendContext, PluginSessionViewInput } from "learnharness-plugin-api";
-import { CHEVRON_DOWN, CHEVRON_UP, ERASER, GRID, HAND, PEN, REDO, TRASH, UNDO } from "./icons.ts";
+import { CHEVRON_DOWN, CHEVRON_UP, ERASER, GRID, HAND, PEN, REDO, STYLUS, TRASH, UNDO } from "./icons.ts";
 import { mountReference, referenceFor } from "./reference.ts";
-import { viewOrigin } from "./geometry.ts";
+import { DEFAULT_ZOOM, pinchCamera, screenToWorld, viewOrigin, zoomAroundAnchor } from "./geometry.ts";
 import {
   clampStrokeWidth,
   MAX_STROKE_WIDTH,
@@ -14,6 +14,11 @@ import {
 } from "./strokes.ts";
 import type { Draft, PublishReason, SessionSheet, Sheets } from "./state.ts";
 import { INK_COLORS, resolvePaperTheme, resolveStrokeColor, type PaperTheme } from "./theme.ts";
+
+const PALM_CONTACT_PX = 24;
+const PINCH_CANCEL_STROKE_MS = 350;
+const PINCH_CANCEL_STROKE_PX = 30;
+const POST_PEN_TOUCH_COOLDOWN_MS = 600;
 
 export interface MountedSheet {
   flush(): void;
@@ -67,11 +72,26 @@ export function mountSheet(
   let inlineError: string | undefined;
   let active: Stroke | undefined;
   let activeDraftId: number | undefined;
-  let activePointerType: string | undefined;
-  let activeStartedAt = 0;
-  let pointerId: number | undefined;
-  let panDrag: { x: number; y: number; pan: Draft["pan"]; rightButton: boolean } | undefined;
+  let drawPointerId: number | undefined;
+  let drawPointerType: string | undefined;
+  let drawStartedAt = 0;
+  let drawStartClient: { x: number; y: number } | undefined;
+  let drawMaxTravelSq = 0;
+  let lastPenActivityAt = -Infinity;
+  let panDrag: { pointerId: number; x: number; y: number; pan: Draft["pan"]; rightButton: boolean } | undefined;
+  const activeTouches = new Map<number, { clientX: number; clientY: number }>();
+  let touchGestureLock = false;
+  let pinchGesture: {
+    id1: number;
+    id2: number;
+    startMid: { x: number; y: number };
+    startDist: number;
+    startPan: Draft["pan"];
+    startZoom: number;
+  } | undefined;
   let canvasFrame: number | undefined;
+
+  const isInteracting = () => drawPointerId !== undefined || panDrag !== undefined || pinchGesture !== undefined;
 
   const cancelCanvasFrame = () => {
     if (canvasFrame !== undefined && typeof cancelAnimationFrame === "function") {
@@ -80,12 +100,33 @@ export function mountSheet(
     canvasFrame = undefined;
   };
 
+  const releaseCapture = (id: number) => {
+    try {
+      if (inkCanvas.hasPointerCapture(id)) inkCanvas.releasePointerCapture(id);
+    } catch {}
+  };
+
+  const discardActiveTouchStroke = () => {
+    if (drawPointerType !== "touch") return;
+    const staleId = drawPointerId;
+    active = undefined;
+    activeDraftId = undefined;
+    drawPointerId = undefined;
+    drawPointerType = undefined;
+    drawStartClient = undefined;
+    drawMaxTravelSq = 0;
+    if (staleId !== undefined) releaseCapture(staleId);
+  };
+
   const commitActive = () => {
     const stroke = active;
     const id = activeDraftId;
     active = undefined;
     activeDraftId = undefined;
-    activePointerType = undefined;
+    drawPointerId = undefined;
+    drawPointerType = undefined;
+    drawStartClient = undefined;
+    drawMaxTravelSq = 0;
     panDrag = undefined;
     const draft = currentDraft();
     if (stroke && draft.id === id && stroke.points.length > 0) {
@@ -93,27 +134,27 @@ export function mountSheet(
     }
   };
 
-  const canUndo = () => !disposed && !signal.aborted && !staging && pointerId === undefined && currentDraft().strokes.length > 0;
-  const canRedo = () => !disposed && !signal.aborted && !staging && pointerId === undefined && currentDraft().redoStack.length > 0;
+  const canUndo = () => !disposed && !signal.aborted && !staging && !isInteracting() && currentDraft().strokes.length > 0;
+  const canRedo = () => !disposed && !signal.aborted && !staging && !isInteracting() && currentDraft().redoStack.length > 0;
   const undoHistory = () => { if (canUndo()) sheets.undo(state, currentDraft()); };
   const redoHistory = () => { if (canRedo()) sheets.redo(state, currentDraft()); };
   const clearCanvas = () => {
-    if (disposed || signal.aborted || staging || pointerId !== undefined) return;
+    if (disposed || signal.aborted || staging || isInteracting()) return;
     inlineError = undefined;
     sheets.clear(state, currentDraft());
   };
   const togglePenEraser = () => {
-    if (!disposed && !signal.aborted && pointerId === undefined) {
+    if (!disposed && !signal.aborted && !isInteracting()) {
       sheets.setTool(state, state.tool === "pen" ? "eraser" : "pen");
     }
   };
   const selectHand = () => {
-    if (!disposed && !signal.aborted && pointerId === undefined) {
+    if (!disposed && !signal.aborted && !isInteracting()) {
       sheets.setTool(state, "hand");
     }
   };
   const canUseEditingShortcuts = () => {
-    if (disposed || signal.aborted || staging || pointerId !== undefined) return false;
+    if (disposed || signal.aborted || staging || isInteracting()) return false;
     const focused = document.activeElement;
     return (
       focused instanceof HTMLElement &&
@@ -227,7 +268,29 @@ export function mountSheet(
   );
   gridBtn.setAttribute("aria-pressed", "false");
 
-  topbarLeft.append(questionBtn, gridBtn);
+  const stylusBtn = makeButton(
+    "drawing-pad-top-btn",
+    "Stylus only",
+    () => {
+      sheets.setStylusOnly(state, !state.stylusOnly, true);
+    },
+    `${STYLUS}<span class="drawing-pad-top-text">Stylus</span>`,
+  );
+  stylusBtn.title = "Stylus only (palm rejection): ignore single-finger touch; use two fingers to pan and zoom";
+  stylusBtn.setAttribute("aria-pressed", String(state.stylusOnly));
+
+  const zoomBtn = makeButton(
+    "drawing-pad-top-btn drawing-pad-zoom-btn",
+    "Reset zoom",
+    () => {
+      if (disposed || signal.aborted || staging) return;
+      sheets.setCamera(state, currentDraft(), { x: 0, y: 0 }, DEFAULT_ZOOM);
+    },
+    "100%",
+  );
+  zoomBtn.title = "Reset zoom and view position";
+
+  topbarLeft.append(questionBtn, gridBtn, stylusBtn, zoomBtn);
 
   const themeGroup = document.createElement("div");
   themeGroup.className = "drawing-pad-theme-group";
@@ -330,6 +393,11 @@ export function mountSheet(
     questionDrawer.hidden = !questionExpanded;
 
     gridBtn.setAttribute("aria-pressed", String(draft.grid));
+    stylusBtn.setAttribute("aria-pressed", String(state.stylusOnly));
+    const zoomPct = Math.round(draft.zoom * 100);
+    zoomBtn.textContent = `${zoomPct}%`;
+    const isDefaultCamera = Math.abs(draft.zoom - DEFAULT_ZOOM) < 0.005 && Math.abs(draft.pan.x) < 0.5 && Math.abs(draft.pan.y) < 0.5;
+    zoomBtn.disabled = staging || isDefaultCamera;
     for (const key of ["light", "dark", "app"] as const) {
       themeButtons[key].setAttribute("aria-pressed", String(draft.paperTheme === key));
     }
@@ -342,9 +410,10 @@ export function mountSheet(
     errorBanner.textContent = inlineError ?? "";
 
     // Bottom pill controls
-    undoBtn.disabled = staging || pointerId !== undefined || !draft.strokes.length;
-    redoBtn.disabled = staging || pointerId !== undefined || !draft.redoStack.length;
-    clearBtn.disabled = staging || pointerId !== undefined || (!draft.strokes.length && !draft.redoStack.length && draft.pan.x === 0 && draft.pan.y === 0);
+    const busy = isInteracting();
+    undoBtn.disabled = staging || busy || !draft.strokes.length;
+    redoBtn.disabled = staging || busy || !draft.redoStack.length;
+    clearBtn.disabled = staging || busy || (!draft.strokes.length && !draft.redoStack.length && isDefaultCamera);
 
     penBtn.setAttribute("aria-pressed", String(state.tool === "pen"));
     eraserBtn.setAttribute("aria-pressed", String(state.tool === "eraser"));
@@ -361,7 +430,7 @@ export function mountSheet(
     }
     widthValue.textContent = `${state.strokeWidth}px`;
 
-    inkCanvas.style.cursor = panDrag ? "grabbing" : state.tool === "hand" ? "grab" : "crosshair";
+    inkCanvas.style.cursor = panDrag || pinchGesture ? "grabbing" : state.tool === "hand" ? "grab" : "crosshair";
   };
 
   const renderCanvas = () => {
@@ -385,11 +454,11 @@ export function mountSheet(
     const history = active && activeDraftId === draft.id ? [...draft.strokes, active] : draft.strokes;
     const inkCtx = inkCanvas.getContext("2d", { willReadFrequently: true });
     if (inkCtx && typeof inkCtx.isContextLost === "function" && inkCtx.isContextLost()) return;
-    paintInk(inkCanvas, width, height, history, paper, origin);
+    paintInk(inkCanvas, width, height, history, paper, origin, draft.zoom);
 
     gridCanvas.hidden = !draft.grid;
     if (draft.grid) {
-      paintGrid(gridCanvas, width, height, paper.gridColor, origin, 24);
+      paintGrid(gridCanvas, width, height, paper.gridColor, origin, 24, draft.zoom);
     } else {
       const gctx = gridCanvas.getContext("2d");
       gctx?.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
@@ -420,9 +489,10 @@ export function mountSheet(
     const rect = inkCanvas.getBoundingClientRect();
     const draft = currentDraft();
     const origin = viewOrigin(rect.width, rect.height, draft.pan, 0);
+    const world = screenToWorld(event.clientX - rect.left, event.clientY - rect.top, origin, draft.zoom);
     return {
-      x: event.clientX - rect.left - origin.x,
-      y: event.clientY - rect.top - origin.y,
+      x: world.x,
+      y: world.y,
       pressure: event.pointerType === "pen" && event.pressure > 0 ? event.pressure : 0.5,
     };
   };
@@ -441,49 +511,180 @@ export function mountSheet(
     render();
   };
 
+  const isPalmTouch = (event: PointerEvent): boolean =>
+    event.pointerType === "touch" &&
+    ((typeof event.width === "number" && event.width >= PALM_CONTACT_PX) ||
+      (typeof event.height === "number" && event.height >= PALM_CONTACT_PX));
+
+  const beginPinchFromTouches = () => {
+    const entries = [...activeTouches.entries()];
+    if (entries.length < 2) return;
+    const [[id1, t1], [id2, t2]] = entries as [[number, { clientX: number; clientY: number }], [number, { clientX: number; clientY: number }]];
+    const rect = inkCanvas.getBoundingClientRect();
+    const x1 = t1.clientX - rect.left;
+    const y1 = t1.clientY - rect.top;
+    const x2 = t2.clientX - rect.left;
+    const y2 = t2.clientY - rect.top;
+    const draft = currentDraft();
+    pinchGesture = {
+      id1,
+      id2,
+      startMid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 },
+      startDist: Math.max(10, Math.hypot(x2 - x1, y2 - y1)),
+      startPan: { ...draft.pan },
+      startZoom: draft.zoom,
+    };
+    touchGestureLock = true;
+    renderChrome();
+  };
+
   const down = (event: PointerEvent) => {
     const rightButton = event.pointerType === "mouse" && event.button === 2;
-    if (disposed || signal.aborted || staging || !event.isPrimary) return;
-    // Apple Pencil priority / palm rejection: if a fresh uncommitted touch contact
-    // just landed (<250ms, <=4 samples) and an active stylus ("pen") touches down,
-    // discard the accidental palm stroke without committing to undo history.
-    if (
-      pointerId !== undefined &&
-      event.pointerType === "pen" &&
-      activePointerType === "touch" &&
-      !panDrag &&
-      active &&
-      active.points.length <= 4 &&
-      performance.now() - activeStartedAt < 250
-    ) {
-      const staleId = pointerId;
-      active = undefined;
-      activeDraftId = undefined;
-      activePointerType = undefined;
-      pointerId = undefined;
-      try {
-        if (inkCanvas.hasPointerCapture(staleId)) inkCanvas.releasePointerCapture(staleId);
-      } catch {}
+    if (disposed || signal.aborted || staging) return;
+
+    // Touch handling: track ALL non-palm fingers (including non-primary) for
+    // reliable 2-finger pinch-zoom + 2-finger pan, and enforce Option A palm rejection.
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+      if (isPalmTouch(event)) return;
+      activeTouches.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+
+      // Never let touch contacts interrupt an active stylus stroke.
+      if (drawPointerType === "pen") return;
+
+      // 2+ fingers always transition into pinch-zoom + 2-finger pan.
+      if (activeTouches.size >= 2) {
+        if (drawPointerType === "touch") {
+          const elapsed = performance.now() - drawStartedAt;
+          if (elapsed < PINCH_CANCEL_STROKE_MS || drawMaxTravelSq <= PINCH_CANCEL_STROKE_PX * PINCH_CANCEL_STROKE_PX) {
+            discardActiveTouchStroke();
+          } else {
+            commitActive();
+          }
+        }
+        if (panDrag) {
+          releaseCapture(panDrag.pointerId);
+          panDrag = undefined;
+        }
+        if (activeTouches.size === 2) {
+          beginPinchFromTouches();
+          render();
+        }
+        return;
+      }
+
+      // Single finger after a 2-finger gesture must wait until all fingers lift.
+      if (touchGestureLock) return;
+
+      // Explicit Hand tool allows 1-finger panning even when Stylus-only is on.
+      if (state.tool === "hand") {
+        viewport.focus({ preventScroll: true });
+        panDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, pan: { ...currentDraft().pan }, rightButton: false };
+        try { inkCanvas.setPointerCapture(event.pointerId); } catch {}
+        renderChrome();
+        return;
+      }
+
+      // Option A palm rejection: when Stylus-only is enabled (or immediately after
+      // stylus activity), ignore single-finger touch completely (no ink, no pan).
+      if (state.stylusOnly || performance.now() - lastPenActivityAt < POST_PEN_TOUCH_COOLDOWN_MS) {
+        return;
+      }
+
+      if (drawPointerId !== undefined || !event.isPrimary) return;
+      viewport.focus({ preventScroll: true });
+      drawPointerId = event.pointerId;
+      drawPointerType = "touch";
+      drawStartedAt = performance.now();
+      drawStartClient = { x: event.clientX, y: event.clientY };
+      drawMaxTravelSq = 0;
+      try { inkCanvas.setPointerCapture(event.pointerId); } catch {}
+      start(event);
+      return;
     }
-    if (pointerId !== undefined) return;
+
+    if (!event.isPrimary) return;
+
+    // Apple Pencil / stylus always wins over any resting palm or uncommitted touch stroke,
+    // and automatically enables Option A Stylus-only palm rejection on this device.
+    if (event.pointerType === "pen") {
+      lastPenActivityAt = performance.now();
+      if (drawPointerType === "touch") {
+        discardActiveTouchStroke();
+      }
+      if (panDrag && panDrag.rightButton === false) {
+        releaseCapture(panDrag.pointerId);
+        panDrag = undefined;
+      }
+      if (pinchGesture) {
+        pinchGesture = undefined;
+      }
+      if (!state.stylusOnly) {
+        sheets.setStylusOnly(state, true, true);
+      }
+    }
+
+    if (drawPointerId !== undefined || panDrag !== undefined) return;
     if (event.pointerType === "mouse" && event.button !== 0 && !rightButton) return;
     event.preventDefault();
     viewport.focus({ preventScroll: true });
-    pointerId = event.pointerId;
-    activePointerType = event.pointerType;
-    activeStartedAt = performance.now();
     try { inkCanvas.setPointerCapture(event.pointerId); } catch {}
+
     if (rightButton || state.tool === "hand") {
-      panDrag = { x: event.clientX, y: event.clientY, pan: currentDraft().pan, rightButton };
-      render();
-    } else if (event.pointerType !== "pen" || event.pressure > 0) {
+      panDrag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, pan: { ...currentDraft().pan }, rightButton };
+      renderChrome();
+      return;
+    }
+
+    drawPointerId = event.pointerId;
+    drawPointerType = event.pointerType;
+    drawStartedAt = performance.now();
+    drawStartClient = { x: event.clientX, y: event.clientY };
+    drawMaxTravelSq = 0;
+    if (event.pointerType !== "pen" || event.pressure > 0) {
       start(event);
     }
   };
 
   const move = (event: PointerEvent) => {
-    if (disposed || signal.aborted || pointerId !== event.pointerId) return;
-    if (panDrag) {
+    if (disposed || signal.aborted) return;
+
+    if (event.pointerType === "pen") {
+      lastPenActivityAt = performance.now();
+    }
+
+    if (event.pointerType === "touch" && activeTouches.has(event.pointerId)) {
+      activeTouches.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY });
+      if (pinchGesture) {
+        const t1 = activeTouches.get(pinchGesture.id1);
+        const t2 = activeTouches.get(pinchGesture.id2);
+        if (t1 && t2) {
+          const rect = inkCanvas.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            const x1 = t1.clientX - rect.left;
+            const y1 = t1.clientY - rect.top;
+            const x2 = t2.clientX - rect.left;
+            const y2 = t2.clientY - rect.top;
+            const curMid = { x: (x1 + x2) / 2, y: (y1 + y2) / 2 };
+            const curDist = Math.max(10, Math.hypot(x2 - x1, y2 - y1));
+            const nextCam = pinchCamera(
+              rect.width,
+              rect.height,
+              pinchGesture.startPan,
+              pinchGesture.startZoom,
+              pinchGesture.startMid,
+              pinchGesture.startDist,
+              curMid,
+              curDist,
+            );
+            sheets.setCamera(state, currentDraft(), nextCam.pan, nextCam.zoom);
+          }
+        }
+        return;
+      }
+    }
+
+    if (panDrag && panDrag.pointerId === event.pointerId) {
       if (panDrag.rightButton && (event.buttons & 2) === 0) {
         finish(event);
         return;
@@ -496,7 +697,16 @@ export function mountSheet(
       }
       return;
     }
+
+    if (drawPointerId !== event.pointerId) return;
     if (state.tool === "hand") return;
+    if (drawStartClient) {
+      const dx = event.clientX - drawStartClient.x;
+      const dy = event.clientY - drawStartClient.y;
+      const distSq = dx * dx + dy * dy;
+      if (distSq > drawMaxTravelSq) drawMaxTravelSq = distSq;
+    }
+
     const coalesced = event.getCoalescedEvents?.() ?? [];
     const samples = coalesced.length ? coalesced : [event];
     const draft = currentDraft();
@@ -505,11 +715,27 @@ export function mountSheet(
 
     for (const sample of samples) {
       if (sample.pointerType === "pen" && sample.pressure <= 0) {
-        commitActive();
+        const stroke = active;
+        const id = activeDraftId;
+        active = undefined;
+        activeDraftId = undefined;
+        const latestDraft = currentDraft();
+        if (stroke && latestDraft.id === id && stroke.points.length > 0) {
+          sheets.commitStroke(state, latestDraft, stroke);
+        }
         continue;
       }
       const nextTool = (sample.buttons & 32) !== 0 ? "eraser" : state.tool;
-      if (active && active.tool !== nextTool) commitActive();
+      if (active && active.tool !== nextTool) {
+        const stroke = active;
+        const id = activeDraftId;
+        active = undefined;
+        activeDraftId = undefined;
+        const latestDraft = currentDraft();
+        if (latestDraft.id === id && stroke.points.length > 0) {
+          sheets.commitStroke(state, latestDraft, stroke);
+        }
+      }
       if (!active) {
         start(sample);
         continue;
@@ -531,25 +757,73 @@ export function mountSheet(
   };
 
   const finish = (event: PointerEvent) => {
-    if (pointerId !== event.pointerId) return;
-    if (panDrag && event.type === "pointerup" && event.pointerType !== "pen") {
-      sheets.setPan(state, currentDraft(), {
-        x: panDrag.pan.x + event.clientX - panDrag.x,
-        y: panDrag.pan.y + event.clientY - panDrag.y,
-      });
+    if (event.pointerType === "pen") {
+      lastPenActivityAt = performance.now();
     }
+
+    if (event.pointerType === "touch") {
+      activeTouches.delete(event.pointerId);
+      if (pinchGesture && (pinchGesture.id1 === event.pointerId || pinchGesture.id2 === event.pointerId)) {
+        pinchGesture = undefined;
+        renderChrome();
+      }
+      if (activeTouches.size === 0) {
+        touchGestureLock = false;
+      }
+    }
+
+    if (panDrag && panDrag.pointerId === event.pointerId) {
+      if (event.type === "pointerup" && event.pointerType !== "pen") {
+        sheets.setPan(state, currentDraft(), {
+          x: panDrag.pan.x + event.clientX - panDrag.x,
+          y: panDrag.pan.y + event.clientY - panDrag.y,
+        });
+      }
+      panDrag = undefined;
+      releaseCapture(event.pointerId);
+      render();
+      return;
+    }
+
+    if (drawPointerId !== event.pointerId) return;
     if (active && event.type === "pointerup" && event.pointerType !== "pen") {
       active.points.push(point(event));
     }
-    commitActive();
-    pointerId = undefined;
-    activePointerType = undefined;
-    try {
-      if (inkCanvas.hasPointerCapture(event.pointerId)) {
-        inkCanvas.releasePointerCapture(event.pointerId);
-      }
-    } catch {}
+    if (event.type === "pointercancel" && drawPointerType === "touch" && performance.now() - drawStartedAt < PINCH_CANCEL_STROKE_MS) {
+      discardActiveTouchStroke();
+    } else {
+      commitActive();
+    }
+    releaseCapture(event.pointerId);
     render();
+  };
+
+  const onWheel = (event: WheelEvent) => {
+    if (disposed || signal.aborted || staging) return;
+    event.preventDefault();
+    const draft = currentDraft();
+    const rect = inkCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    if (event.ctrlKey || event.metaKey) {
+      const factor = Math.exp(-event.deltaY * 0.004);
+      const next = zoomAroundAnchor(
+        rect.width,
+        rect.height,
+        draft.pan,
+        draft.zoom,
+        draft.zoom * factor,
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+      );
+      sheets.setCamera(state, draft, next.pan, next.zoom);
+    } else {
+      sheets.setCamera(
+        state,
+        draft,
+        { x: draft.pan.x - event.deltaX, y: draft.pan.y - event.deltaY },
+        draft.zoom,
+      );
+    }
   };
 
   inkCanvas.addEventListener("contextrestored", render, { signal });
@@ -563,8 +837,10 @@ export function mountSheet(
     if (event.touches.length > 1 && event.cancelable) event.preventDefault();
   }, { signal, passive: false });
   inkCanvas.addEventListener("contextmenu", event => event.preventDefault(), { signal });
-  viewport.addEventListener("gesturestart", event => event.preventDefault(), { signal });
-  viewport.addEventListener("wheel", event => event.preventDefault(), { signal, passive: false });
+  for (const name of ["gesturestart", "gesturechange", "gestureend"] as const) {
+    viewport.addEventListener(name, event => event.preventDefault(), { signal });
+  }
+  viewport.addEventListener("wheel", onWheel, { signal, passive: false });
 
   const changed = (reason: PublishReason) => {
     if (disposed) return;
@@ -591,7 +867,9 @@ export function mountSheet(
     disposed = true;
     cancelCanvasFrame();
     commitActive();
-    pointerId = undefined;
+    activeTouches.clear();
+    pinchGesture = undefined;
+    touchGestureLock = false;
     unsubscribe();
     resize.disconnect();
     referenceMount?.dispose();

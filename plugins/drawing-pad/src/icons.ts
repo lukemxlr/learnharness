@@ -10,3 +10,4 @@ export const GRID = icon('<rect x="3" y="3" width="18" height="18" rx="2"/><path
 export const CHEVRON_DOWN = icon('<path d="m6 9 6 6 6-6"/>');
 export const CHEVRON_UP = icon('<path d="m18 15-6-6-6 6"/>');
 export const TRASH = icon('<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>');
+export const STYLUS = icon('<path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L8 19l-5 2 2-5Z"/><path d="m15 6 3 3"/><path d="M13 21h8"/>');

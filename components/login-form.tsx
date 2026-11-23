@@ -46,7 +46,7 @@ export function LoginForm({
 	}
 
 	return (
-		<main className="flex min-h-dvh items-center justify-center bg-background pl-[max(1rem,var(--lh-safe-left))] pr-[max(1rem,var(--lh-safe-right))] pt-[max(2rem,var(--lh-safe-top))] pb-[max(2rem,var(--lh-safe-bottom))] text-foreground">
+		<main className="flex h-dvh w-full overflow-y-auto overscroll-y-contain items-center justify-center bg-background pl-[max(1rem,var(--lh-safe-left))] pr-[max(1rem,var(--lh-safe-right))] pt-[max(2rem,var(--lh-safe-top))] pb-[max(2rem,var(--lh-safe-bottom))] text-foreground">
 			<div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-lg">
 				<h1 className="font-title text-xl font-semibold tracking-tight text-foreground">
 					Sign in to LearnHarness

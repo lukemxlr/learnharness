@@ -168,7 +168,20 @@
 	border-color: var(--color-border);
 }
 
+html {
+	height: 100%;
+	width: 100%;
+	overflow: hidden;
+	overscroll-behavior: none;
+}
+
 body {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	overscroll-behavior: none;
 	background: var(--color-background);
 	color: var(--color-foreground);
 	font-family: var(--font-ui);
@@ -676,9 +689,18 @@ body {
    so rows, rules and highlights run to the edge; a thin bar draws on top. */
 .lh-overlay-scroll {
 	scrollbar-width: none;
+	overscroll-behavior-y: contain;
+	-webkit-overflow-scrolling: touch;
 }
 .lh-overlay-scroll::-webkit-scrollbar {
 	display: none;
+}
+
+/* Contain touch scroll bounce inside chat transcripts so iPadOS Safari / PWA
+   never chains overscroll up to the locked document viewport. */
+[role="log"] > div {
+	overscroll-behavior-y: contain;
+	-webkit-overflow-scrolling: touch;
 }
 
 /* Runtime font contracts: Appearance overrides the reading family and,
