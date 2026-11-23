@@ -134,11 +134,16 @@ LearnHarness validates the incoming `Host` (or `X-Forwarded-Host` when `LH_TRUST
   - Point the tunnel ingress hostname (e.g., `https://learn.example.com`) to `http://127.0.0.1:3000`.
   - Keep `LH_TRUST_PROXY=1` enabled so LearnHarness sees `X-Forwarded-Proto: https` and marks the `lh_session` cookie `Secure`, while validating `Origin` and `Sec-Fetch-Site` against the public HTTPS origin.
   - Ensure no proxy rule buffers or caches `/api/chat`, `/api/chats/*/stream`, `/api/chats/*/side-chats/*`, or `/api/events` (LearnHarness emits `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`, plus periodic keepalive pings).
-  - **Cloudflare Access note:** If you add Cloudflare Access Zero Trust authentication in front of your tunnel and plan to connect with the Electron remote desktop client, add a **Bypass** policy for `/api/health` so Electron's connectivity probe succeeds before interactive login.
-- **LAN HTTP vs. HTTPS**:
-  - Chat, attachments, Drawing Pad, and copy buttons work over both HTTPS and direct trusted LAN HTTP (`http://<LXC-IP>:3000`), using a browser-safe UUID fallback when `crypto.randomUUID` is unavailable in non-secure contexts.
-  - Browser microphone **Dictation** (`Dictate`) requires a secure browser context (`HTTPS` or `localhost`) and displays a clear `"Dictation requires HTTPS"` notice if clicked over plain LAN HTTP.
-  - On iPadOS Safari or outside your trusted LAN, always use your HTTPS Cloudflare Tunnel or reverse-proxy URL.
+  - **Cloudflare Access:** Fully supported natively by the LearnHarness desktop app (`v0.7.2+`). When Cloudflare Access redirects `/api/health` or an expired session to `*.cloudflareaccess.com/cdn-cgi/access/login/...`, Electron opens an isolated modal sign-in window (zero preload/IPC) for your email OTP / SSO login, stores the `CF_Authorization` cookie in the app session, and resumes seamlessly — no `/api/health` bypass is required.
+- **Tailscale HTTPS (private zero-config TLS for Browser, iPad, &amp; Desktop):**
+  - If you prefer Tailscale over a public domain/Cloudflare Tunnel, enable automatic Let's Encrypt HTTPS on your LXC in one command:
+    ```bash
+    tailscale serve --bg http://127.0.0.1:3000
+    ```
+  - Add your MagicDNS hostname (`<machine>.<tailnet>.ts.net`) to `LH_ALLOWED_HOSTS` and set `LH_TRUST_PROXY=1` in `/etc/learnharness/learnharness.env`, then restart `learnharness`. Both iPad Safari and desktop browsers get full HTTPS (including microphone **Dictation**) without exposing your server to the public internet.
+- **LAN / Tailscale HTTP vs. HTTPS:**
+  - Chat, attachments, Drawing Pad, and copy buttons work over both HTTPS and direct trusted LAN/Tailscale HTTP (`http://<LXC-IP>:3000`), using a browser-safe UUID fallback when `crypto.randomUUID` is unavailable in non-secure contexts.
+  - Browser microphone **Dictation** (`Dictate`) requires a secure context (`HTTPS` or `localhost`) in web browsers and iPad Safari. In the Electron desktop app, you can either connect over HTTPS (recommended: Cloudflare Tunnel or `tailscale serve`) or enable the explicit **Allow microphone (Dictation) over trusted LAN / Tailscale HTTP** opt-in checkbox in the server setup screen for private RFC1918 / Tailscale (`100.64.0.0/10`) / `.local` / `.ts.net` addresses.
 
 ---
 
@@ -279,7 +284,14 @@ Verify safety and idempotency:
 
 ## 6. Backup, Restore & Server Updates
 
-### 6.1 Periodic backups
+### 6.0 In-app Backups, Automatic Safety Snapshots &amp; 1-Click Restore
+
+From **Settings → General → Backups &amp; Restore** (available in local mode, remote desktop, web browser, and iPad Safari):
+- **Backup &amp; download:** creates a verified `.tar.gz` snapshot under `<LH_DATA_DIR>/.backups/` (excluding API keys and login credentials) and downloads it immediately.
+- **Restore from file…:** upload any `.tar.gz` backup, preview its contents, and choose **Merge safely** (preserves newer existing chats) or **Full replace** (exact restore).
+- **Automatic rollback protection:** before every restore or 1-click local-to-server migration, LearnHarness automatically creates a verified `pre-restore` or `pre-migration` safety snapshot so you can roll back with one click in **Saved snapshots** if anything goes wrong.
+
+### 6.1 Periodic backups (CLI / Proxmox snapshot)
 
 For a guaranteed consistent backup, stop the service briefly (or take an atomic Proxmox LXC/ZFS snapshot), then archive both `/var/lib/learnharness` and `/etc/learnharness`:
 

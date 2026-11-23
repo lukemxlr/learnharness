@@ -104,6 +104,20 @@ function runtime(): Runtime {
 }
 
 export async function initializePlugins(): Promise<void> { await runtime().ready; }
+/** Reload active plugin runtimes after on-disk backup restore or migration so in-memory stores (e.g., Flashcards) reflect disk truth immediately. */
+export async function reloadPluginsAfterDataChange(): Promise<void> {
+	const global = globalThis as typeof globalThis & PluginGlobal;
+	const current = global.__lhPlugins;
+	if (!current) return;
+	global.__lhPlugins = undefined;
+	try {
+		await current.ready.catch(() => {});
+		await current.host.dispose();
+	} catch {
+		/* best-effort dispose before re-initializing from disk */
+	}
+	await initializePlugins();
+}
 export async function getPluginHost(): Promise<Host> {
 	const { host, ready } = runtime();
 	await ready;

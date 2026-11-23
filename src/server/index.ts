@@ -57,7 +57,7 @@ export * from "./model-catalog.ts";
 export { refreshModelCatalog } from "./remote-model-catalog.ts";
 export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";
-export { initializePlugins, getPluginHost, getPluginAgentContributions, getPluginQuestionTypeResolver, pluginTransport } from "./plugins.ts";
+export { initializePlugins, reloadPluginsAfterDataChange, getPluginHost, getPluginAgentContributions, getPluginQuestionTypeResolver, pluginTransport } from "./plugins.ts";
 export { createPluginDocumentRoute } from "./plugin-transport.ts";
 export { pluginProblemAvailabilityOf, type ProblemTypeResolver } from "./plugin-problems.ts";
 export { pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, preparePluginQuestionDismissal, type QuestionTypeResolver } from "./plugin-questions.ts";
@@ -69,4 +69,5 @@ export { customProviderGet, customProviderMutation } from "./custom-provider-htt
 export * from "./attachments.ts";
 export * from "./attachment-delivery.ts";
 export * from "./user-auth.ts";
+export * from "./backups.ts";
 export { isHttpsRequest, effectiveRequestHost, effectiveRequestProto } from "./desktop-access.ts";

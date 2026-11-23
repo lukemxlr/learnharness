@@ -48,7 +48,8 @@ import { SettingsRow, SettingsSection } from "./controls.tsx";
 import { Button } from "@/components/ui/button";
 import type { SessionStatusResponse } from "@/src/core";
 import { UpdateSettings } from "./update-settings.tsx";
-import { useCanChangeServerUrl } from "@/components/remote-server";
+import { BackupsAndMigrationSection } from "./backups-section.tsx";
+import { useCanChangeServerUrl, useCanSwitchFromLocalToServer } from "@/components/remote-server";
 import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -501,6 +502,7 @@ export function SettingsDialogBody({
 									/>
 									<RemoteServerConnectionRow />
 									<AccountSessionRow />
+									<BackupsAndMigrationSection />
 								</SettingsSection>
 							)}
 							{active === "keys" && (
@@ -578,7 +580,30 @@ export function SettingsDialogBody({
 
 function RemoteServerConnectionRow() {
 	const canChangeServerUrl = useCanChangeServerUrl();
-	if (!canChangeServerUrl) return null;
+	const canSwitchToServer = useCanSwitchFromLocalToServer();
+	if (!canChangeServerUrl && !canSwitchToServer) return null;
+	if (canSwitchToServer) {
+		return (
+			<SettingsRow
+				label="Server connection"
+				hint="Running locally on this computer. You can connect to a self-hosted server and migrate your local data anytime."
+				testid="row-local-server-mode"
+			>
+				<Button
+					type="button"
+					size="xs"
+					variant="outline"
+					data-testid="connect-remote-server"
+					className="min-h-11 px-3"
+					onClick={() => {
+						void window.lh?.changeServerUrl?.();
+					}}
+				>
+					Connect to a server
+				</Button>
+			</SettingsRow>
+		);
+	}
 	return (
 		<SettingsRow
 			label="Server connection"

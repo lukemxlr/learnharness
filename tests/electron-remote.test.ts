@@ -17,12 +17,15 @@ const mainSource = fs.readFileSync(mainFile, "utf8");
 const mainRequire = createRequire(mainFile);
 
 const remoteConfig = require("../electron/remote-config.cjs") as {
-	readRemoteConfig: (dir: string) => { mode: string; serverUrl: string | null; updatedAt?: string };
-	writeRemoteConfig: (dir: string, next: { mode: string; serverUrl?: string | null }) => { mode: string; serverUrl: string | null; updatedAt: string };
+	readRemoteConfig: (dir: string) => { mode: string; serverUrl: string | null; allowInsecureLanMic?: boolean; updatedAt?: string };
+	writeRemoteConfig: (dir: string, next: { mode: string; serverUrl?: string | null; allowInsecureLanMic?: boolean }) => { mode: string; serverUrl: string | null; allowInsecureLanMic: boolean; updatedAt: string };
 	allowedOriginForConfig: (config: { mode?: string; serverUrl?: string | null } | null) => string | null;
 	shouldUseLocalDataDir: (config: { mode?: string; serverUrl?: string | null } | null) => boolean;
 	validateServerUrl: (raw: unknown) => { ok: boolean; serverUrl?: string; origin?: string; error?: string };
-	probeServerHealth: (url: string, opts?: { timeoutMs?: number }) => Promise<{ ok: boolean; origin?: string; error?: string }>;
+	isPrivateLanOrTailscaleHttpOrigin: (raw: unknown) => boolean;
+	isCloudflareAccessUrl: (raw: unknown) => boolean;
+	detectCloudflareAccessResponse: (status: number, location?: unknown, wwwAuth?: unknown) => { isCfAccess: boolean; authUrl: string | null; teamOrigin: string | null };
+	probeServerHealth: (url: string, opts?: { timeoutMs?: number; fetchImpl?: typeof fetch }) => Promise<{ ok: boolean; origin?: string; needsCloudflareAuth?: boolean; authUrl?: string; error?: string }>;
 };
 const { trustedSender } = require("../electron/chatgpt-ipc.cjs") as {
 	trustedSender: (event: unknown, origin: string, BrowserWindow: unknown) => boolean;
@@ -42,17 +45,17 @@ after(() => {
 describe("electron/remote-config.cjs", () => {
 	it("fails closed on missing/corrupt/invalid config and normalizes valid remote URLs", () => {
 		const dir = mkTempDir("lh-remote-cfg-");
-		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null });
+		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false });
 
 		fs.writeFileSync(path.join(dir, "remote-config.json"), "{bad json", "utf8");
-		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null });
+		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false });
 
 		fs.writeFileSync(
 			path.join(dir, "remote-config.json"),
 			JSON.stringify({ mode: "remote", serverUrl: "javascript:alert(1)" }),
 			"utf8",
 		);
-		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null });
+		assert.deepEqual(remoteConfig.readRemoteConfig(dir), { mode: "unset", serverUrl: null, allowInsecureLanMic: false });
 
 		const saved = remoteConfig.writeRemoteConfig(dir, {
 			mode: "remote",
@@ -186,6 +189,48 @@ describe("electron/remote-config.cjs", () => {
 			await new Promise<void>((r) => server.close(() => r()));
 		}
 	});
+	it("classifies private LAN & Tailscale HTTP origins and detects Cloudflare Access redirects", async () => {
+		for (const okOrigin of [
+			"http://192.168.1.50:3000",
+			"http://10.0.0.5:3000",
+			"http://172.16.4.2:3000",
+			"http://100.64.12.34:3000",
+			"http://100.127.255.1:3000",
+			"http://learnharness.local:3000",
+			"http://box.tailnet.ts.net:3000",
+			"http://learnharness:3000",
+		]) {
+			assert.equal(remoteConfig.isPrivateLanOrTailscaleHttpOrigin(okOrigin), true, okOrigin);
+		}
+		for (const badOrigin of [
+			"https://192.168.1.50:3000",
+			"http://localhost:3000",
+			"http://127.0.0.1:3000",
+			"http://8.8.8.8:3000",
+			"http://example.com:3000",
+			"http://100.128.0.1:3000",
+		]) {
+			assert.equal(remoteConfig.isPrivateLanOrTailscaleHttpOrigin(badOrigin), false, badOrigin);
+		}
+
+		assert.equal(remoteConfig.isCloudflareAccessUrl("https://my-team.cloudflareaccess.com/cdn-cgi/access/login/app.example.com"), true);
+		assert.equal(remoteConfig.isCloudflareAccessUrl("http://my-team.cloudflareaccess.com/login"), false);
+		assert.equal(remoteConfig.isCloudflareAccessUrl("https://evil-cloudflareaccess.com/login"), false);
+
+		const cfProbe = await remoteConfig.probeServerHealth("https://app.example.test", {
+			fetchImpl: (async () =>
+				new Response("", {
+					status: 302,
+					headers: {
+						location: "https://my-team.cloudflareaccess.com/cdn-cgi/access/login/app.example.test",
+						"www-authenticate": "Cloudflare-Access",
+					},
+				})) as unknown as typeof fetch,
+		});
+		assert.equal(cfProbe.ok, false);
+		assert.equal(cfProbe.needsCloudflareAuth, true);
+		assert.equal(cfProbe.authUrl, "https://my-team.cloudflareaccess.com/cdn-cgi/access/login/app.example.test");
+	});
 });
 
 describe("electron/chatgpt-ipc.cjs trustedSender hardening", () => {
@@ -242,10 +287,17 @@ describe("electron remote & setup preloads + static HTML CSP", () => {
 		assert.equal(typeof exposed.changeServerUrl, "function");
 		assert.deepEqual(Object.keys(exposed).sort(), [
 			"changeServerUrl",
+			"checkForUpdates",
 			"expandWindow",
+			"getAppVersion",
+			"getUpdateState",
 			"getZoom",
+			"inspectLocalProfile",
+			"installUpdate",
 			"isRemoteMode",
+			"migrateLocalProfile",
 			"onOpenSettings",
+			"onUpdateStatus",
 			"onZoom",
 			"platform",
 			"setAppearance",
@@ -258,10 +310,6 @@ describe("electron remote & setup preloads + static HTML CSP", () => {
 			"subscriptions",
 			"subscriptionTransport",
 			"openSubscriptionBrowser",
-			"getUpdateState",
-			"onUpdateStatus",
-			"checkForUpdates",
-			"installUpdate",
 			"fs",
 			"shell",
 		]) {
@@ -292,13 +340,26 @@ describe("electron remote & setup preloads + static HTML CSP", () => {
 				},
 			}),
 		});
-		assert.deepEqual(Object.keys(exposed).sort(), ["cancel", "getState", "openSetup", "platform", "reconnect", "saveServerUrl"]);
+		assert.deepEqual(Object.keys(exposed).sort(), [
+			"cancel",
+			"getState",
+			"openServerDocs",
+			"openSetup",
+			"platform",
+			"reconnect",
+			"saveServerUrl",
+			"useLocalMode",
+		]);
 		await (exposed.saveServerUrl as (u: string) => Promise<unknown>)("https://lh.example.test");
+		await (exposed.useLocalMode as () => Promise<unknown>)();
+		await (exposed.openServerDocs as () => Promise<unknown>)();
 		await (exposed.reconnect as () => Promise<unknown>)();
 		await (exposed.openSetup as () => Promise<unknown>)();
 		await (exposed.cancel as () => Promise<unknown>)();
 		assert.deepEqual(invoked, [
 			["lh:setup:save", "https://lh.example.test"],
+			["lh:setup:use-local"],
+			["lh:setup:open-docs"],
 			["lh:setup:reconnect"],
 			["lh:setup:open"],
 			["lh:setup:cancel"],
@@ -384,12 +445,14 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 		const app = Object.assign(new EventEmitter(), {
 			name: "LearnHarness",
 			setName() {},
+			getVersion: () => "0.7.2",
 			getPath: (key: string) => {
 				assert.equal(key, "userData");
 				return userDataDir;
 			},
 			setPath() {},
 			requestSingleInstanceLock: () => false,
+			relaunch() { localCalls.push("relaunch"); },
 			quit() {},
 			exit(code: number) { localCalls.push(`exit:${code}`); },
 			whenReady: async () => {},
@@ -504,19 +567,21 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 			const m = bootRemoteMain(userDataDir);
 			await m.bootPromise;
 
-			// 1. Zero local server/OAuth/updater/DATA_DIR initialization
-			assert.deepEqual(m.localCalls, []);
+			// 1. Zero local server/OAuth/path-picker initialization
+			assert.equal(m.localCalls.length, 0);
 			for (const forbiddenIpc of [
 				"lh:chatgpt:control",
 				"lh:subscriptions:control",
 				"lh:subscriptions:web-browser",
 				"lh:attachment:pick",
-				"lh:update:get",
-				"lh:update:check",
 			]) {
 				assert.equal(m.handleMap.has(forbiddenIpc), false, `remote mode must not register ${forbiddenIpc}`);
 			}
-			assert.equal(m.onMap.has("lh:update-install"), false, "remote mode must not register lh:update-install");
+			// Safe desktop updater + app version IPC ARE available in remote mode
+			assert.equal(m.handleMap.has("lh:update:get"), true);
+			assert.equal(m.handleMap.has("lh:update:check"), true);
+			assert.equal(m.handleMap.has("lh:app:version"), true);
+			assert.equal(m.onMap.has("lh:update-install"), true);
 
 			// 2. First-run opens setup.html in isolated setup window with preload-setup.cjs
 			assert.equal(m.windows.length, 1);
@@ -533,10 +598,10 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 			setupWin.webContents.emit("will-navigate", { preventDefault: () => { navPrevented = true; } }, originA);
 			assert.equal(navPrevented, true);
 
-			// Menu has Change Server URL… and omits Check for Updates…
+			// Menu has Change Server URL… and Check for Updates…
 			const appMenu = m.getMenuTemplate()[0]!.submenu!;
 			assert.ok(appMenu.some((item) => item.label === "Change Server URL…" && item.accelerator === "CommandOrControl+Alt+S"));
-			assert.equal(appMenu.some((item) => item.label === "Check for Updates…"), false);
+			assert.ok(appMenu.some((item) => item.label === "Check for Updates…"));
 
 			// Untrusted sender cannot call lh:setup:save
 			await assert.rejects(
@@ -704,6 +769,26 @@ describe("electron/main.cjs remote isolation, dynamic origin, CSP, and reconnect
 			});
 			await new Promise((r) => setImmediate(r));
 			assert.ok(m.windows.at(-1)!.loadedFile.endsWith("remote-reconnect.html"));
+
+			// 9. Setup window "Don't have a server set up yet?" opens fork setup docs externally
+			const finalReconnectWin = m.windows.at(-1)!;
+			await m.handleMap.get("lh:setup:open-docs")!({
+				sender: finalReconnectWin.webContents,
+				senderFrame: finalReconnectWin.webContents.mainFrame,
+			});
+			assert.ok(
+				m.externalOpened.some((u) => u.includes("lukemxlr/learnharness") && u.includes("setup-and-operation.md")),
+				"open-docs must open the fork's server setup guide in the OS browser",
+			);
+
+			// 10. Setup window "Run locally" persists mode=local and relaunches cleanly
+			const useLocalRes = await m.handleMap.get("lh:setup:use-local")!({
+				sender: finalReconnectWin.webContents,
+				senderFrame: finalReconnectWin.webContents.mainFrame,
+			});
+			assert.deepEqual(JSON.parse(JSON.stringify(useLocalRes)), { ok: true, mode: "local", relaunching: true });
+			assert.equal(remoteConfig.readRemoteConfig(userDataDir).mode, "local");
+			assert.ok(m.localCalls.includes("relaunch"), "switching to local mode must trigger app.relaunch()");
 		} finally {
 			serverA.closeAllConnections();
 			serverB.closeAllConnections();

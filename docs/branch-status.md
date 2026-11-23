@@ -2,10 +2,16 @@
 
 This document tracks the implemented features and verification results for the self-hosted server, iPadOS Safari + Apple Pencil, unified attachments, and remote desktop fork of LearnHarness (based on upstream `v0.7.0`).
 
-## Current status (`v0.7.1`)
+## Current status (`v0.7.2`)
 
-All implementation milestones, upstream `v0.7.0` integration, post-deployment LAN-HTTP & iPadOS enhancements, and automated Linux Docker / Playwright WebKit verification suites pass on `main`:
+All implementation milestones, upstream `v0.7.0` integration, `v0.7.1` LAN-HTTP & iPadOS enhancements, `v0.7.2` Local/Remote onboarding + Cloudflare Access + in-app Backups/Restore/1-click Migration + sidebar Knowledge Graph + new-session image paste, and automated Linux Docker verification suites pass on `main`:
 
+- **`v0.7.2` Onboarding, Cloudflare Access, Backups & UX Upgrades:**
+  - Equal side-by-side Desktop first-run choice (**Run locally** with migration callout vs **Connect to a server** with setup docs link) and Settings → General mode switching (`electron/setup.html`, `electron/main.cjs`, `components/settings/settings-dialog.tsx`).
+  - Built-in **Cloudflare Access** modal authentication & mid-session expiry recovery in Electron using `net.fetch` and an isolated modal `BrowserWindow` (`electron/remote-config.cjs`, `electron/main.cjs`).
+  - Optional private LAN / Tailscale `http://` dictation opt-in (`allowInsecureLanMic`) in Electron + `tailscale serve` HTTPS guidance in docs.
+  - Pure-Node `.tar.gz` **Backups & Restore**, automatic `pre-restore` / `pre-migration` safety snapshots, plugin runtime reload (including Flashcards v1 store merge), and 1-click **Migrate local data to server** in Settings → General (`src/server/backup-archive.ts`, `src/server/backups.ts`, `electron/local-migrate.cjs`, `app/api/backups/**`, `components/settings/backups-section.tsx`).
+  - Always-visible **Knowledge Graph** button in the sidebar (`components/sidebar.tsx`), desktop auto-updater + desktop/server version display in remote mode (`components/settings/update-settings.tsx`), and `Ctrl+V` image paste & file attachment staging on new Teaching/Practice/Home sessions (`components/home.tsx`, `components/new-session.tsx`, `components/opening-prompt.ts`, `components/chat.tsx`).
 - **Upstream `v0.7.0` Integration:** Merged `amosblomqvist/learnharness` `v0.7.0` (`Next.js 16.4.6`, `learnharness@0.7.0`).
 - **Reverse-Proxy Header Guard:** `scripts/build-server.mjs` wraps the standalone entrypoint (`server.js` → `server.next.cjs`) and strips untrusted `x-forwarded-*` and `forwarded` headers whenever `LH_TRUST_PROXY !== "1"`.
 - **LAN-HTTP Non-Secure Context Support:** Added RFC-4122 v4 browser UUID fallback (`src/core/uuid.ts`), optimistic-build guard in `components/session-core.ts`, clipboard copy fallback in `components/settings/chatgpt-connection.tsx`, and clean `DICTATION_INSECURE_CONTEXT` (`"Dictation requires HTTPS"`) handling in `components/dictation.tsx` (`tests/insecure-context-browser.test.tsx`).

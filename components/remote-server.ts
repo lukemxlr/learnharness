@@ -10,6 +10,15 @@ export function canChangeRemoteServerUrl(): boolean {
 	return Boolean(window.lh?.isRemoteMode && typeof window.lh?.changeServerUrl === "function");
 }
 
+export function canSwitchFromLocalToServer(): boolean {
+	if (typeof window === "undefined") return false;
+	return Boolean(window.lh && !window.lh.isRemoteMode && typeof window.lh.changeServerUrl === "function");
+}
+
 export function useCanChangeServerUrl(): boolean {
 	return useSyncExternalStore(noopSubscribe, canChangeRemoteServerUrl, () => false);
+}
+
+export function useCanSwitchFromLocalToServer(): boolean {
+	return useSyncExternalStore(noopSubscribe, canSwitchFromLocalToServer, () => false);
 }

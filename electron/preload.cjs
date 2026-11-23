@@ -84,6 +84,7 @@ contextBridge.exposeInMainWorld("lh", {
 		},
 	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
+	changeServerUrl: () => ipcRenderer.invoke("lh:local:switch-to-server"),
 	setAppearance: (a) => ipcRenderer.send("lh:appearance", a),
 	onZoom: (cb) => {
 		const listener = (_event, factor) => cb(factor);

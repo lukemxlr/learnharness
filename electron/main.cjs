@@ -24,7 +24,7 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog, net: electronNet } = require("electron");
 const { pickAttachmentPath } = require("./attachment-picker.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
@@ -38,8 +38,12 @@ const {
 	allowedOriginForConfig,
 	shouldUseLocalDataDir,
 	validateServerUrl,
+	isPrivateLanOrTailscaleHttpOrigin,
+	isCloudflareAccessUrl,
+	detectCloudflareAccessResponse,
 	probeServerHealth,
 } = require("./remote-config.cjs");
+const { inspectLocalDataDir, migrateLocalDataToServer } = require("./local-migrate.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -47,6 +51,16 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+
+const SERVER_SETUP_DOCS_URL = "https://github.com/lukemxlr/learnharness/blob/main/docs/setup-and-operation.md";
+const APP_VERSION = (() => {
+	try {
+		const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+		return typeof pkg?.version === "string" ? pkg.version : "";
+	} catch {
+		return "";
+	}
+})();
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
 // renderer owns the number; this is the IPC widen target).
@@ -97,6 +111,33 @@ function serverEntry() {
 // MUST run before the single-instance lock — a helper is a second
 // instance of this very binary, and before the LH_DEV_URL redirect — the
 // helper owns no user data at all.
+let appliedInsecureLanMic = false;
+let appliedInsecureLanOrigin = null;
+
+// Pre-ready Chromium flag for explicit user opt-in: allow microphone/Dictation
+// over a trusted private LAN or Tailscale HTTP origin (must run before app.whenReady).
+try {
+	if (
+		!process.argv.includes("--browser-service") &&
+		!process.env.LH_DEV_URL &&
+		!process.argv.includes("--local") &&
+		process.env.LH_LOCAL_MODE !== "1"
+	) {
+		const bootCfg = readRemoteConfig(app.getPath("userData"));
+		if (
+			bootCfg?.mode === "remote" &&
+			bootCfg.allowInsecureLanMic === true &&
+			isPrivateLanOrTailscaleHttpOrigin(bootCfg.serverUrl)
+		) {
+			app.commandLine?.appendSwitch?.("unsafely-treat-insecure-origin-as-secure", bootCfg.serverUrl);
+			appliedInsecureLanMic = true;
+			appliedInsecureLanOrigin = bootCfg.serverUrl;
+		}
+	}
+} catch {
+	/* ignore pre-ready check errors in stripped test stubs */
+}
+
 if (process.argv.includes("--browser-service")) {
 	const { waitForBrowserService } = require("./browser-service-readiness.cjs");
 	// Own the helper's entire startup lifetime, including the readiness wait.
@@ -407,6 +448,131 @@ function windowChromeOptions() {
 	};
 }
 
+let activeCfAuthPromise = null;
+let lastCfAuthAt = 0;
+
+function probeWithElectronSession(serverUrl, opts = {}) {
+	if (typeof electronNet?.fetch === "function") {
+		return probeServerHealth(serverUrl, {
+			...opts,
+			fetchImpl: (...args) => electronNet.fetch(...args),
+		});
+	}
+	return probeServerHealth(serverUrl, opts);
+}
+
+/**
+ * Isolated modal BrowserWindow for Cloudflare Access authentication (Email OTP,
+ * Passkey, or SSO). Runs with ZERO preload/IPC access and shares Electron's
+ * persistent defaultSession cookie jar so `CF_Authorization` is stored cleanly
+ * for the main remote window.
+ */
+function openCloudflareAccessWindow(serverOrigin, authUrl) {
+	return new Promise((resolve) => {
+		let settled = false;
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			resolve(result);
+		};
+		const parent = (currentRemoteWindow && !currentRemoteWindow.isDestroyed?.())
+			? currentRemoteWindow
+			: (currentSetupWindow && !currentSetupWindow.isDestroyed?.())
+				? currentSetupWindow
+				: undefined;
+
+		const authWin = new BrowserWindow({
+			width: 520,
+			height: 700,
+			...(parent ? { parent, modal: true } : {}),
+			title: "Cloudflare Access Sign-In",
+			autoHideMenuBar: true,
+			backgroundColor: chromeColors(appearance).color,
+			webPreferences: {
+				contextIsolation: true,
+				sandbox: true,
+				nodeIntegration: false,
+			},
+		});
+
+		try {
+			const ua = authWin.webContents.getUserAgent?.();
+			if (typeof ua === "string" && ua.includes("Electron/")) {
+				authWin.webContents.setUserAgent?.(ua.replace(/\s*Electron\/[^\s]+/g, ""));
+			}
+		} catch { /* optional */ }
+
+		const handleReturnToOrigin = (targetUrl) => {
+			const targetOrigin = originForHttpUrl(targetUrl);
+			if (targetOrigin && targetOrigin === serverOrigin) {
+				// Let Cloudflare's Set-Cookie response settle on /cdn-cgi/access/authorized before closing
+				if (!targetUrl.includes("/cdn-cgi/access/")) {
+					lastCfAuthAt = Date.now();
+					finish({ ok: true });
+					closeWindowSafely(authWin);
+				}
+			}
+		};
+
+		authWin.webContents.on("will-navigate", (event, target) => {
+			let parsed;
+			try { parsed = new URL(target); } catch { event.preventDefault(); return; }
+			if (parsed.protocol !== "https:") {
+				event.preventDefault();
+				return;
+			}
+			handleReturnToOrigin(target);
+		});
+		authWin.webContents.on("will-redirect", (event, target) => {
+			let parsed;
+			try { parsed = new URL(target); } catch { event.preventDefault(); return; }
+			if (parsed.protocol !== "https:") {
+				event.preventDefault();
+				return;
+			}
+			handleReturnToOrigin(target);
+		});
+		authWin.webContents.on("did-navigate", (_event, target) => {
+			handleReturnToOrigin(target);
+		});
+		authWin.webContents.setWindowOpenHandler?.(({ url: target }) => {
+			let parsed;
+			try { parsed = new URL(target); } catch { return { action: "deny" }; }
+			if (parsed.protocol === "https:") {
+				void authWin.loadURL(target);
+			}
+			return { action: "deny" };
+		});
+		authWin.once("closed", () => {
+			finish({ ok: false, error: "Cloudflare Access sign-in was cancelled." });
+		});
+
+		const startUrl = typeof authUrl === "string" && authUrl.startsWith("https://")
+			? authUrl
+			: `${serverOrigin}/api/health`;
+		void authWin.loadURL(startUrl);
+	});
+}
+
+function triggerCloudflareReauth(serverOrigin, authUrl, { reloadRemote = false } = {}) {
+	if (!serverOrigin) return Promise.resolve({ ok: false, error: "No remote server configured." });
+	if (Date.now() - lastCfAuthAt < 3000) return Promise.resolve({ ok: true });
+	if (activeCfAuthPromise) return activeCfAuthPromise;
+	activeCfAuthPromise = (async () => {
+		try {
+			log(`cloudflare-access: opening sign-in modal for ${serverOrigin}`);
+			const res = await openCloudflareAccessWindow(serverOrigin, authUrl);
+			if (res.ok && reloadRemote && currentRemoteWindow && !currentRemoteWindow.isDestroyed?.()) {
+				currentRemoteWindow.webContents.reload?.();
+			}
+			return res;
+		} finally {
+			activeCfAuthPromise = null;
+		}
+	})();
+	return activeCfAuthPromise;
+}
+
 function createWindow(url, opts = {}) {
 	const isRemote = opts.remote === true;
 	const preloadFile = opts.preloadFile ?? (isRemote ? "preload-remote.cjs" : "preload.cjs");
@@ -434,6 +600,10 @@ function createWindow(url, opts = {}) {
 		const allowed = getAllowedOrigin(url);
 		if (!allowed || targetOrigin !== allowed) {
 			event.preventDefault();
+			if (isRemote && allowed && isCloudflareAccessUrl(target)) {
+				void triggerCloudflareReauth(allowed, target, { reloadRemote: true });
+				return;
+			}
 			openExternalLink(target);
 		}
 	};
@@ -641,6 +811,21 @@ function installRemoteWebRequestHandlers() {
 					}
 				});
 			}
+			const locHeader = responseHeaders.location ?? responseHeaders.Location;
+			const wwwHeader = responseHeaders["www-authenticate"] ?? responseHeaders["Www-Authenticate"];
+			const cf = detectCloudflareAccessResponse(details.statusCode, locHeader, wwwHeader);
+			if (
+				cf.isCfAccess &&
+				currentRemoteWindow &&
+				!currentRemoteWindow.isDestroyed?.() &&
+				(details.webContentsId === undefined || details.webContentsId === currentRemoteWindow.webContents?.id)
+			) {
+				setImmediate(() => {
+					void triggerCloudflareReauth(allowed, cf.authUrl || details.url, {
+						reloadRemote: details.resourceType === "mainFrame",
+					});
+				});
+			}
 		}
 		callback({ responseHeaders });
 	});
@@ -838,8 +1023,14 @@ function installMenu({ remoteMode = false, onChangeServerUrl } = {}) {
 	const appSubmenu = [
 		{ role: "about" },
 		...(remoteMode
-			? [{ label: "Change Server URL…", accelerator: "CommandOrControl+Alt+S", click: () => onChangeServerUrl?.() }]
-			: [{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() }]),
+			? [
+				{ label: "Change Server URL…", accelerator: "CommandOrControl+Alt+S", click: () => onChangeServerUrl?.() },
+				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
+			]
+			: [
+				...(onChangeServerUrl ? [{ label: "Connect to Server…", accelerator: "CommandOrControl+Alt+S", click: () => onChangeServerUrl() }] : []),
+				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
+			]),
 		{ type: "separator" },
 		{ role: "hide" },
 		{ role: "hideOthers" },
@@ -1002,7 +1193,35 @@ async function main() {
 			BrowserWindow, dialog, trustedAppWindows, origin: getAllowedOrigin(url),
 		}));
 
-		installMenu({ remoteMode: false });
+		installMenu({
+			remoteMode: false,
+			...(!devUrl ? {
+				onChangeServerUrl: () => {
+					lastRemoteError = null;
+					if (currentSetupWindow && !currentSetupWindow.isDestroyed?.()) {
+						currentSetupWindow.focus?.();
+						return;
+					}
+					currentSetupWindow = createSetupWindow("setup.html");
+				},
+			} : {}),
+		});
+
+		if (!devUrl) {
+			ipcMain.handle("lh:local:switch-to-server", (event) => {
+				const win = BrowserWindow.fromWebContents(event.sender);
+				if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(url), BrowserWindow)) {
+					throw new Error("Untrusted desktop request.");
+				}
+				lastRemoteError = null;
+				if (currentSetupWindow && !currentSetupWindow.isDestroyed?.()) {
+					currentSetupWindow.focus?.();
+					return { ok: true };
+				}
+				currentSetupWindow = createSetupWindow("setup.html");
+				return { ok: true };
+			});
+		}
 
 		// Auto-update (Wave C): wire the updater before the window so the
 		// banner channel is live from first paint; the first check and the 24h
@@ -1029,7 +1248,7 @@ async function main() {
 	} else {
 		appearance = normalizeAppearance(null);
 		nativeTheme.themeSource = themeSourceFor(appearance.mode);
-		activeRemoteConfig = initialConfig ?? { mode: "unset", serverUrl: null };
+		activeRemoteConfig = initialConfig ?? { mode: "unset", serverUrl: null, allowInsecureLanMic: false };
 		activeRemoteOrigin = allowedOriginForConfig(activeRemoteConfig);
 		lastRemoteError = null;
 
@@ -1042,6 +1261,23 @@ async function main() {
 			},
 		});
 
+		setupAutoUpdater();
+		ipcMain.on("lh:update-install", (event) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
+				log("auto-update: ignored install request from an untrusted sender");
+				return;
+			}
+			installUpdateNow();
+		});
+		ipcMain.handle("lh:update:get", (event) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) throw new Error("Untrusted desktop request.");
+			return updateState;
+		});
+		ipcMain.handle("lh:update:check", (event) => {
+			if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) throw new Error("Untrusted desktop request.");
+			checkForUpdates({ manual: true });
+		});
+
 		ipcMain.handle("lh:remote:change-server", (event) => {
 			const win = BrowserWindow.fromWebContents(event.sender);
 			if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
@@ -1052,22 +1288,112 @@ async function main() {
 			return { ok: true };
 		});
 
+		ipcMain.handle("lh:remote:inspect-local", (event) => {
+			const win = BrowserWindow.fromWebContents(event.sender);
+			if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
+				throw new Error("Untrusted remote request.");
+			}
+			return inspectLocalDataDir(DATA_DIR());
+		});
+
+		ipcMain.handle("lh:remote:migrate-local", async (event, opts) => {
+			const win = BrowserWindow.fromWebContents(event.sender);
+			if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
+				throw new Error("Untrusted remote request.");
+			}
+			if (!activeRemoteOrigin) {
+				return { ok: false, error: "Not connected to a remote server." };
+			}
+			const fetchImpl = typeof electronNet?.fetch === "function"
+				? (...args) => electronNet.fetch(...args)
+				: globalThis.fetch;
+			return migrateLocalDataToServer({
+				dataDir: DATA_DIR(),
+				userDataDir: app.getPath("userData"),
+				serverOrigin: activeRemoteOrigin,
+				dryRun: Boolean(opts?.dryRun),
+				fetchImpl,
+			});
+		});
+
+		reopenWindow = () => (activeRemoteOrigin ? openRemoteWindow(activeRemoteOrigin) : openSetupWindow("setup.html"));
+	}
+
+	// Shared setup-window & read-only app-version IPC (setup IPC strictly gated
+	// to local setup.html / remote-reconnect.html via isTrustedSetupSender).
+	ipcMain.handle("lh:app:version", (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender);
+		if (!trustedAppWindows.has(win) || !trustedSender(event, getAllowedOrigin(), BrowserWindow)) {
+			throw new Error("Untrusted desktop request.");
+		}
+		return APP_VERSION;
+	});
+
+	if (!devUrl) {
 		ipcMain.handle("lh:setup:get-state", (event) => {
 			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
 			return {
 				serverUrl: activeRemoteConfig.serverUrl ?? "",
-				canCancel: Boolean(activeRemoteOrigin),
+				allowInsecureLanMic: Boolean(activeRemoteConfig.allowInsecureLanMic),
+				currentMode: remoteModeActive ? (activeRemoteOrigin ? "remote" : "unset") : "local",
+				canCancel: Boolean(activeRemoteOrigin || !remoteModeActive),
 				lastError: lastRemoteError,
 			};
 		});
 
-		ipcMain.handle("lh:setup:save", async (event, rawUrl) => {
+		ipcMain.handle("lh:setup:open-docs", (event) => {
+			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			openExternalLink(SERVER_SETUP_DOCS_URL);
+			return { ok: true };
+		});
+
+		ipcMain.handle("lh:setup:use-local", (event) => {
+			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			writeRemoteConfig(app.getPath("userData"), { mode: "local", serverUrl: null, allowInsecureLanMic: false });
+			if (!remoteModeActive) {
+				if (currentSetupWindow) closeWindowSafely(currentSetupWindow);
+				currentSetupWindow = null;
+				return { ok: true, mode: "local" };
+			}
+			if (typeof app.relaunch === "function" && typeof app.exit === "function") {
+				app.relaunch();
+				app.exit(0);
+			}
+			return { ok: true, mode: "local", relaunching: true };
+		});
+
+		ipcMain.handle("lh:setup:save", async (event, rawUrl, opts) => {
 			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
 			const validated = validateServerUrl(rawUrl);
 			if (!validated.ok) return { ok: false, error: validated.error };
-			const probe = await probeServerHealth(validated.origin);
+			const wantLanMic =
+				opts?.allowInsecureLanMic === true && isPrivateLanOrTailscaleHttpOrigin(validated.origin);
+
+			let probe = await probeWithElectronSession(validated.origin);
+			if (!probe.ok && probe.needsCloudflareAuth) {
+				const cfRes = await openCloudflareAccessWindow(validated.origin, probe.authUrl);
+				if (!cfRes.ok) return { ok: false, error: cfRes.error || "Cloudflare Access sign-in was cancelled." };
+				probe = await probeWithElectronSession(validated.origin);
+			}
 			if (!probe.ok) return { ok: false, error: probe.error };
-			const saved = writeRemoteConfig(app.getPath("userData"), { mode: "remote", serverUrl: validated.origin });
+
+			const saved = writeRemoteConfig(app.getPath("userData"), {
+				mode: "remote",
+				serverUrl: validated.origin,
+				allowInsecureLanMic: wantLanMic,
+			});
+			const needsRelaunch =
+				!remoteModeActive ||
+				wantLanMic !== appliedInsecureLanMic ||
+				(wantLanMic && validated.origin !== appliedInsecureLanOrigin);
+
+			if (needsRelaunch && typeof app.relaunch === "function" && typeof app.exit === "function") {
+				try { killServer(); } catch { /* ignore */ }
+				app.relaunch();
+				app.exit(0);
+				return { ok: true, serverUrl: validated.origin, relaunching: true };
+			}
+
 			activeRemoteConfig = saved;
 			activeRemoteOrigin = allowedOriginForConfig(saved);
 			lastRemoteError = null;
@@ -1078,7 +1404,15 @@ async function main() {
 		ipcMain.handle("lh:setup:reconnect", async (event) => {
 			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
 			if (!activeRemoteOrigin) return { ok: false, error: "No server URL configured." };
-			const probe = await probeServerHealth(activeRemoteOrigin);
+			let probe = await probeWithElectronSession(activeRemoteOrigin);
+			if (!probe.ok && probe.needsCloudflareAuth) {
+				const cfRes = await openCloudflareAccessWindow(activeRemoteOrigin, probe.authUrl);
+				if (!cfRes.ok) {
+					lastRemoteError = cfRes.error || "Cloudflare Access sign-in was cancelled.";
+					return { ok: false, error: lastRemoteError };
+				}
+				probe = await probeWithElectronSession(activeRemoteOrigin);
+			}
 			if (!probe.ok) {
 				lastRemoteError = probe.error;
 				return { ok: false, error: probe.error };
@@ -1097,13 +1431,16 @@ async function main() {
 
 		ipcMain.handle("lh:setup:cancel", (event) => {
 			if (!isTrustedSetupSender(event)) throw new Error("Untrusted setup request.");
+			if (!remoteModeActive) {
+				if (currentSetupWindow) closeWindowSafely(currentSetupWindow);
+				currentSetupWindow = null;
+				return { ok: true };
+			}
 			if (!activeRemoteOrigin) return { ok: false };
 			lastRemoteError = null;
 			openRemoteWindow(activeRemoteOrigin);
 			return { ok: true };
 		});
-
-		reopenWindow = () => (activeRemoteOrigin ? openRemoteWindow(activeRemoteOrigin) : openSetupWindow("setup.html"));
 	}
 
 	// Sidebar-at-narrow-window (owner, 2026-09-17): the renderer auto-closes
@@ -1163,8 +1500,16 @@ async function main() {
 	} else if (activeRemoteOrigin) {
 		openRemoteWindow(activeRemoteOrigin);
 		log(`remote window open: ${activeRemoteOrigin}`);
+		if (autoUpdater) {
+			checkForUpdates();
+			setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+		}
 	} else {
 		openSetupWindow("setup.html");
 		log("remote setup window open");
+		if (autoUpdater) {
+			checkForUpdates();
+			setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+		}
 	}
 }

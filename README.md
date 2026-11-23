@@ -38,18 +38,20 @@ LearnHarness uses AI agents to plan and teach lessons from your current understa
 3. **iPadOS Safari UX &amp; Overhauled Drawing Pad**
    - Responsive overlay drawer, Split View (`1/3`, `1/2`, Slide Over), `visualViewport` keyboard clearance, 44 × 44 px touch targets, and iPadOS viewport overscroll lock (eliminating accidental rubber-banding of the shell while keeping chat and modals smoothly scrollable).
    - **Drawing Pad** (enable once in **Settings → Core plugins**): full-screen canvas with **Option A palm rejection** (large-contact rejection, pen-over-palm priority, auto-enabling Stylus-only toggle persisted per device), **2-finger pinch-zoom (`50%–400%`) &amp; 2-finger pan** without stray strokes, zoom reset button, `Karoraster` grid overlay, independent `Light` / `Dark` / `App` paper theme (e.g., white paper in dark mode with automatic stroke legibility), Undo/Redo, ink colors, stroke width slider, collapsible Question reference bar, per-question local drafts, and **Add to answer** staging.
-4. **Unified Attachments &amp; `Ctrl+V` Screenshots**
-   - Upload images (`PNG`, `JPEG`, `WebP`, `GIF`, up to 20 MiB) and PDFs (up to 25 MiB / 200 pages) from desktop or iPad **Photo Library** / **Files** into the chat composer, Free-Response questions, or Multiple-Choice reasoning fields.
-   - Press `Ctrl+V` on Windows/Linux to paste screenshots straight from the clipboard.
+4. **Unified Attachments &amp; `Ctrl+V` Screenshots Everywhere**
+   - Upload images (`PNG`, `JPEG`, `WebP`, `GIF`, up to 20 MiB) and PDFs (up to 25 MiB / 200 pages) from desktop or iPad **Photo Library** / **Files** — including right from the start of a new Teaching or Practice session, in active chats, Free-Response questions, and Multiple-Choice reasoning fields.
+   - Press `Ctrl+V` on Windows/Linux to paste screenshots straight from the clipboard on every input surface (including new sessions).
    - Content-addressed attachment store (`<LH_DATA_DIR>/attachments/<sha256>/`) with automatic PDF text extraction and vision page-rendering fallback for scanned PDFs.
 5. **Headless ChatGPT Plus OAuth &amp; Dynamic Model Catalog**
    - Connect ChatGPT Plus once on a headless server (paste the loopback redirect URL or forward the callback port over SSH) — both your desktop client and iPad share the single server-side connection.
    - Dynamically discovers newly released ChatGPT models via `/models` with an on-demand **Refresh models** button in Settings, retaining the last-known-good catalog on transient errors and never altering models pinned to existing sessions.
-6. **Isolated Remote Desktop Client (Windows &amp; Linux)**
-   - Connects straight to your self-hosted server out of the box (press `Ctrl+Alt+S` or right-click → **Change Server URL…** anytime), with a privilege-isolated remote preload and automatic reconnect UI.
-   - Still supports full standalone local desktop mode whenever needed via `--local` (or `LH_LOCAL_MODE=1`).
-7. **Safe Local-to-Server Profile Migration (`scripts/migrate-profile.mjs`)**
-   - Strictly read-only export from an existing local Windows/Linux/macOS LearnHarness `data/` folder with SHA-256 integrity manifest, `--dry-run` preview (`0` bytes written), referenced PDF/image bundling (`--source-files-root`), idempotent merge, and newer-server protection.
+6. **Flexible Local &amp; Remote Desktop App (Windows &amp; Linux) + Built-in Cloudflare Access**
+   - First launch offers two equal choices side by side: **Run locally** on your PC (with seamless later migration to a server) or **Connect to a remote server** (with a direct link to the server setup guide).
+   - Native **Cloudflare Access** login &amp; automatic session re-authentication inside an isolated modal window — no need to disable Cloudflare Access or bypass `/api/health`.
+   - Optional **LAN / Tailscale HTTP microphone opt-in** for trusted private networks, automatic desktop updates in both local and remote modes, and an always-visible **Knowledge Graph** button in the sidebar.
+7. **In-App Backups, Automatic Safety Snapshots &amp; 1-Click Migration**
+   - **Settings → General → Backups &amp; Restore:** create &amp; download verified `.tar.gz` backups anytime, restore from a `.tar.gz` file (*Merge safely* or *Full replace*), or roll back with one click to an **automatic safety snapshot** (`pre-migration` / `pre-restore`) created before every change.
+   - **1-Click Local → Server Migration:** when switching from local mode to a remote server, Electron detects local desktop data, saves automatic local + server safety backups, uploads attachments individually (avoiding Cloudflare's 100 MB request cap), and merges chats, knowledge graph, and flashcards idempotently. CLI tooling (`scripts/migrate-profile.mjs`) remains available for offline/scripted transfers.
 
 ---
 
@@ -74,7 +76,7 @@ Download the latest release from **[GitHub Releases](https://github.com/lukemxlr
 - **Windows (x64):** `LearnHarness-<version>-x64-setup.exe` (unsigned per-user NSIS installer; Windows SmartScreen may show an "unknown publisher" prompt).
 - **Linux (x64):** `LearnHarness-<version>-x86_64.AppImage` or `LearnHarness-<version>-amd64.deb`.
 
-On first launch, enter your self-hosted LearnHarness URL (e.g., `https://learn.example.com` or `http://<server-ip>:3000`) and sign in. To run completely locally without a remote server, launch with `--local` (or set `LH_LOCAL_MODE=1`).
+On first launch, choose **Run locally** on your computer or **Connect to a server** (enter `https://learn.example.com`, your Tailscale HTTPS URL, or a LAN `http://<server-ip>:3000` address). You can switch between local and remote modes anytime via **Settings → General** or `Ctrl+Alt+S`.
 
 > **macOS note:** Automated releases in this fork publish Windows x64, Linux x64, and the Linux server bundle (no unsigned macOS release installers are published). macOS users can run in any browser against the self-hosted server or build locally from source.
 
@@ -120,8 +122,8 @@ curl -fsS http://127.0.0.1:3000/api/health   # -> {"ok":true}
 
 - **ChatGPT Plus (headless):** Open **Settings → Providers → Subscriptions → ChatGPT → Connect → Get sign-in link**, sign in using your local browser, paste the resulting `http://127.0.0.1:<port>/auth/callback?...` URL back into **Complete sign-in**, and click **Refresh models** anytime new models roll out.
 - **Drawing Pad:** Open **Settings → Core plugins** and enable **Drawing Pad** (applies to both Desktop and iPad).
-- **HTTPS &amp; Dictation note:** Chat, attachments, and Drawing Pad work over both HTTPS and trusted LAN HTTP; browser microphone **Dictation** strictly requires HTTPS (e.g., via Cloudflare Tunnel or a TLS reverse proxy).
-- **Cloudflare Access note:** If you protect your tunnel with Cloudflare Access, add a Bypass rule for `/api/health` if you connect using the Electron desktop remote client.
+- **HTTPS, Tailscale &amp; Dictation note:** Chat, attachments, and Drawing Pad work over both HTTPS and trusted LAN/Tailscale HTTP. Browser microphone **Dictation** requires HTTPS — Tailscale users can enable automatic private HTTPS in one command (`tailscale serve --bg http://127.0.0.1:3000` + `LH_ALLOWED_HOSTS=<machine>.<tailnet>.ts.net` + `LH_TRUST_PROXY=1`), and the Electron desktop app also offers an explicit opt-in checkbox for trusted LAN/Tailscale HTTP.
+- **Cloudflare Access:** Supported natively inside the desktop app via an isolated Cloudflare Access sign-in window (including automatic re-authentication when your Cloudflare session expires) — no `/api/health` bypass required.
 
 ### 4. Migrate Existing Local Chats, Knowledge Graph &amp; Flashcards
 

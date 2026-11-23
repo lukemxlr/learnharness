@@ -51,8 +51,79 @@ function validateServerUrl(raw) {
 	return { ok: true, serverUrl: parsed.origin, origin: parsed.origin };
 }
 
+/**
+ * True ONLY for plain `http://` origins pointing to a private LAN or Tailscale
+ * host (RFC1918, Tailscale CGNAT 100.64.0.0/10, link-local, IPv6 ULA, `*.local`,
+ * `*.ts.net`, or single-label LAN hostnames). Excludes localhost/127.0.0.1
+ * (already secure contexts) and public internet hosts.
+ */
+function isPrivateLanOrTailscaleHttpOrigin(rawUrl) {
+	if (typeof rawUrl !== "string" || !rawUrl) return false;
+	let parsed;
+	try {
+		parsed = new URL(rawUrl);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol !== "http:") return false;
+	const host = parsed.hostname.toLowerCase();
+	if (!host || host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1" || host === "[::1]" || host === "::1") {
+		return false;
+	}
+	// IPv4 private & Tailscale CGNAT ranges
+	const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+	if (ipv4) {
+		const [a, b, c, d] = ipv4.slice(1).map((n) => Number.parseInt(n, 10));
+		if ([a, b, c, d].some((n) => n < 0 || n > 255)) return false;
+		if (a === 10) return true; // 10.0.0.0/8
+		if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+		if (a === 192 && b === 168) return true; // 192.168.0.0/16
+		if (a === 100 && b >= 64 && b <= 127) return true; // Tailscale CGNAT 100.64.0.0/10
+		if (a === 169 && b === 254) return true; // Link-local
+		return false;
+	}
+	// IPv6 ULA (fc00::/7) or link-local (fe80::/10)
+	const bareV6 = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+	if (bareV6.includes(":")) {
+		return /^(fc|fd|fe[89ab])/i.test(bareV6);
+	}
+	if (host.endsWith(".local") || host.endsWith(".ts.net")) return true;
+	// Single-label LAN hostname (e.g. http://learnharness:3000)
+	if (!host.includes(".") && /^[a-z0-9-]+$/.test(host)) return true;
+	return false;
+}
+
+function isCloudflareAccessUrl(rawUrl) {
+	if (typeof rawUrl !== "string" || !rawUrl) return false;
+	try {
+		const parsed = new URL(rawUrl);
+		if (parsed.protocol !== "https:") return false;
+		const host = parsed.hostname.toLowerCase();
+		return host.endsWith(".cloudflareaccess.com") && host.length > ".cloudflareaccess.com".length;
+	} catch {
+		return false;
+	}
+}
+
+function detectCloudflareAccessResponse(statusCode, locationHeader, wwwAuthenticateHeader) {
+	const loc = Array.isArray(locationHeader) ? locationHeader[0] : locationHeader;
+	const www = Array.isArray(wwwAuthenticateHeader) ? wwwAuthenticateHeader.join(", ") : wwwAuthenticateHeader;
+	if ([301, 302, 303, 307, 308].includes(statusCode) && typeof loc === "string" && isCloudflareAccessUrl(loc)) {
+		try {
+			const parsed = new URL(loc);
+			return { isCfAccess: true, authUrl: loc, teamOrigin: parsed.origin };
+		} catch {
+			return { isCfAccess: true, authUrl: loc, teamOrigin: null };
+		}
+	}
+	if (typeof www === "string" && /cloudflare-access/i.test(www) && [301, 302, 303, 307, 401, 403].includes(statusCode)) {
+		return { isCfAccess: true, authUrl: typeof loc === "string" && isCloudflareAccessUrl(loc) ? loc : null, teamOrigin: null };
+	}
+	return { isCfAccess: false, authUrl: null, teamOrigin: null };
+}
+
 function readRemoteConfig(userDataDir) {
-	const failClosed = { mode: "unset", serverUrl: null };
+	const failClosed = { mode: "unset", serverUrl: null, allowInsecureLanMic: false };
 	if (typeof userDataDir !== "string" || !userDataDir) return failClosed;
 	try {
 		const raw = fs.readFileSync(configPath(userDataDir), "utf8");
@@ -60,14 +131,17 @@ function readRemoteConfig(userDataDir) {
 		if (!parsed || typeof parsed !== "object") return failClosed;
 		const updatedAt = typeof parsed.updatedAt === "string" ? parsed.updatedAt : undefined;
 		if (parsed.mode === "local") {
-			return { mode: "local", serverUrl: null, ...(updatedAt ? { updatedAt } : {}) };
+			return { mode: "local", serverUrl: null, allowInsecureLanMic: false, ...(updatedAt ? { updatedAt } : {}) };
 		}
 		if (parsed.mode === "remote") {
 			const validated = validateServerUrl(parsed.serverUrl);
 			if (!validated.ok) return failClosed;
+			const allowInsecureLanMic =
+				parsed.allowInsecureLanMic === true && isPrivateLanOrTailscaleHttpOrigin(validated.serverUrl);
 			return {
 				mode: "remote",
 				serverUrl: validated.serverUrl,
+				allowInsecureLanMic,
 				...(updatedAt ? { updatedAt } : {}),
 			};
 		}
@@ -85,14 +159,18 @@ function writeRemoteConfig(userDataDir, next) {
 		throw new Error('Config mode must be "remote" or "local".');
 	}
 	let normalizedServerUrl = null;
+	let allowInsecureLanMic = false;
 	if (next.mode === "remote") {
 		const validated = validateServerUrl(next.serverUrl);
 		if (!validated.ok) throw new Error(validated.error);
 		normalizedServerUrl = validated.serverUrl;
+		allowInsecureLanMic =
+			next.allowInsecureLanMic === true && isPrivateLanOrTailscaleHttpOrigin(normalizedServerUrl);
 	}
 	const record = {
 		mode: next.mode,
 		serverUrl: normalizedServerUrl,
+		allowInsecureLanMic,
 		updatedAt: new Date().toISOString(),
 	};
 	fs.mkdirSync(userDataDir, { recursive: true });
@@ -114,6 +192,58 @@ function shouldUseLocalDataDir(config) {
 	return config?.mode === "local";
 }
 
+async function probeWithFetch(healthUrl, origin, fetchImpl, timeoutMs) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(new Error(`Connection timed out after ${timeoutMs}ms.`)), timeoutMs);
+	timer.unref?.();
+	try {
+		const res = await fetchImpl(healthUrl, {
+			method: "GET",
+			headers: { accept: "application/json" },
+			redirect: "manual",
+			signal: controller.signal,
+		});
+		const cf = detectCloudflareAccessResponse(
+			res.status,
+			res.headers?.get?.("location"),
+			res.headers?.get?.("www-authenticate"),
+		);
+		if (cf.isCfAccess) {
+			return {
+				ok: false,
+				needsCloudflareAuth: true,
+				origin,
+				authUrl: cf.authUrl || healthUrl,
+				teamOrigin: cf.teamOrigin,
+				error: "Cloudflare Access sign-in required.",
+			};
+		}
+		if (res.status !== 200) {
+			return { ok: false, error: `Server responded with HTTP ${res.status ?? "unknown"}.` };
+		}
+		const text = await res.text();
+		if (Buffer.byteLength(text, "utf8") > 16_384) {
+			return { ok: false, error: "Server health response exceeded maximum size." };
+		}
+		try {
+			const body = JSON.parse(text);
+			if (body && body.ok === true) {
+				return { ok: true, origin };
+			}
+			return { ok: false, error: "Server health check returned an unexpected response." };
+		} catch {
+			return { ok: false, error: "Server health check returned invalid JSON." };
+		}
+	} catch (err) {
+		if (controller.signal.aborted) {
+			return { ok: false, error: `Connection timed out after ${timeoutMs}ms.` };
+		}
+		return { ok: false, error: err?.message || "Could not reach the server." };
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 function probeServerHealth(serverUrl, opts = {}) {
 	const validated = validateServerUrl(serverUrl);
 	if (!validated.ok) {
@@ -121,6 +251,10 @@ function probeServerHealth(serverUrl, opts = {}) {
 	}
 	const timeoutMs = typeof opts.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : 5000;
 	const healthUrl = `${validated.origin}/api/health`;
+	if (typeof opts.fetchImpl === "function") {
+		return probeWithFetch(healthUrl, validated.origin, opts.fetchImpl, timeoutMs);
+	}
+
 	const target = new URL(healthUrl);
 	const client = target.protocol === "https:" ? https : http;
 
@@ -140,6 +274,23 @@ function probeServerHealth(serverUrl, opts = {}) {
 			target,
 			{ method: "GET", headers: { accept: "application/json" } },
 			(res) => {
+				const cf = detectCloudflareAccessResponse(
+					res.statusCode,
+					res.headers?.location,
+					res.headers?.["www-authenticate"],
+				);
+				if (cf.isCfAccess) {
+					res.resume();
+					finish({
+						ok: false,
+						needsCloudflareAuth: true,
+						origin: validated.origin,
+						authUrl: cf.authUrl || healthUrl,
+						teamOrigin: cf.teamOrigin,
+						error: "Cloudflare Access sign-in required.",
+					});
+					return;
+				}
 				const chunks = [];
 				let bytes = 0;
 				res.on("error", (err) => {
@@ -201,5 +352,8 @@ module.exports = {
 	allowedOriginForConfig,
 	shouldUseLocalDataDir,
 	validateServerUrl,
+	isPrivateLanOrTailscaleHttpOrigin,
+	isCloudflareAccessUrl,
+	detectCloudflareAccessResponse,
 	probeServerHealth,
 };

@@ -18,8 +18,14 @@ import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import {
+	extractPastedAttachmentFiles,
+	formatAttachmentUploadError,
+	StagedAttachments,
+	uploadAttachmentFile,
+} from "@/components/attachment-staging";
 import { SessionStarter } from "@/components/start-session";
-import type { TurnUsage } from "@/src/core";
+import type { AttachmentRef, TurnUsage } from "@/src/core";
 
 /**
  * Home — the knowledge graph is the main view, full-bleed edge to edge
@@ -72,6 +78,41 @@ export function Home({
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
 	const [startError, setStartError] = useState(false);
+	const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
+	const attachmentsRef = useRef<AttachmentRef[]>([]);
+	const [uploadingCount, setUploadingCount] = useState(0);
+	const [uploadError, setUploadError] = useState<string | null>(null);
+	const handleUploadFiles = useCallback(async (files: File[]) => {
+		if (files.length === 0) return;
+		setUploadError(null);
+		setUploadingCount((c) => c + files.length);
+		const uploaded: AttachmentRef[] = [];
+		let lastError: string | null = null;
+		for (const file of files) {
+			try {
+				uploaded.push(await uploadAttachmentFile(file));
+			} catch (err) {
+				lastError = formatAttachmentUploadError(err);
+			}
+		}
+		setAttachments((prev) => {
+			const next = [...prev];
+			for (const ref of uploaded) {
+				if (!next.some((item) => item.id === ref.id)) next.push(ref);
+			}
+			attachmentsRef.current = next;
+			return next;
+		});
+		setUploadingCount((c) => Math.max(0, c - files.length));
+		if (lastError) setUploadError(lastError);
+	}, []);
+	const handleRemoveAttachment = useCallback((id: string, index: number) => {
+		setAttachments((prev) => {
+			const next = prev.filter((item, idx) => !(item.id === id && idx === index));
+			attachmentsRef.current = next;
+			return next;
+		});
+	}, []);
 	/* Run end focuses the topic input (owner, 2026-10-01): the hands are on
 	 * the keyboard from the stop. Falling edge only; this surface's only
 	 * dictation target IS this textarea, so no case-split is needed. */
@@ -121,7 +162,8 @@ export function Home({
 	};
 	const begin = async () => {
 		const t = topicRef.current.trim();
-		if (!t || startingRef.current) return;
+		const staged = attachmentsRef.current;
+		if ((!t && staged.length === 0) || startingRef.current || uploadingCount > 0) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
 		if (!configured) {
@@ -153,8 +195,11 @@ export function Home({
 			// graph-context marker as message[0] (a separate custom message
 			// before the learner's first user message, propositions + the
 			// chains among them); the prompt stays the learner's own words.
+			const sessionTitle = t || staged[0]?.filename || "New session";
 			const target = await starterRef.current.start({
-				title: t,
+				title: sessionTitle,
+				...(t ? {} : { openingText: "" }),
+				...(staged.length > 0 ? { attachments: staged } : {}),
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
@@ -246,52 +291,75 @@ export function Home({
 					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 					<form
 						data-attachment-composer=""
-						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
-					onSubmit={(e) => {
-						e.preventDefault();
-						void start();
-					}}
-				>
-					<PathInput
-						ref={topicInputRef}
-						value={topic}
-						onValueChange={(value) => {
-							topicRef.current = value;
-							setTopic(value);
+						className="flex flex-col rounded-2xl border bg-card p-1.5 shadow-lg"
+						onSubmit={(e) => {
+							e.preventDefault();
+							void start();
 						}}
-						defaultDropTarget
-						onKeyDown={(e) => {
-							if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
-							// Esc ends dictation (the dictate decisions: click-again or
-							// Esc) — stopPropagation claims it (keyboard wave A) so
-							// the window chain doesn't also abort a turn.
-							if (e.key === "Escape" && dictation.active) {
-								controller?.claimEscape(e);
+						onPaste={(e) => {
+							if (e.defaultPrevented) return;
+							if (e.target instanceof Element && e.target.closest("[data-file-path-input]")) return;
+							const files = extractPastedAttachmentFiles(e.clipboardData);
+							if (files.length > 0) {
 								e.preventDefault();
-								e.stopPropagation();
-								dictation.cancel();
-								return;
-							}
-							if (e.key === "Enter" && !e.shiftKey) {
-								e.preventDefault();
-								void start();
+								void handleUploadFiles(files);
 							}
 						}}
-						placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
-						autoFocus
-						className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
-					/>
-					<AttachFilesButton editorRef={topicInputRef} />
-					{/* No tooltip on the start square — the ↵ glyph is the
-					    affordance (owner, subtlety round 2026-09-25). */}
-					<button
-						type="submit"
-						aria-label="Start session"
-						disabled={(!topic.trim() && !dictation.active) || busy}
-						className="flex size-10 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
 					>
-						<CornerDownLeftIcon className="size-5" />
-					</button>
+						<StagedAttachments
+							attachments={attachments}
+							uploadingCount={uploadingCount}
+							error={uploadError}
+							onRemove={handleRemoveAttachment}
+							onDismissError={() => setUploadError(null)}
+						/>
+						<div className="flex items-end gap-1.5">
+							<PathInput
+								ref={topicInputRef}
+								value={topic}
+								onValueChange={(value) => {
+									topicRef.current = value;
+									setTopic(value);
+								}}
+								defaultDropTarget
+								onPasteFiles={(files) => { void handleUploadFiles(files); }}
+								onKeyDown={(e) => {
+									if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
+									// Esc ends dictation (the dictate decisions: click-again or
+									// Esc) — stopPropagation claims it (keyboard wave A) so
+									// the window chain doesn't also abort a turn.
+									if (e.key === "Escape" && dictation.active) {
+										controller?.claimEscape(e);
+										e.preventDefault();
+										e.stopPropagation();
+										dictation.cancel();
+										return;
+									}
+									if (e.key === "Enter" && !e.shiftKey) {
+										e.preventDefault();
+										void start();
+									}
+								}}
+								placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
+								autoFocus
+								className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
+							/>
+							<AttachFilesButton
+								editorRef={topicInputRef}
+								onUploadFiles={(files) => { void handleUploadFiles(files); }}
+								disabled={busy || uploadingCount > 0}
+							/>
+							{/* No tooltip on the start square — the ↵ glyph is the
+							    affordance (owner, subtlety round 2026-09-25). */}
+							<button
+								type="submit"
+								aria-label="Start session"
+								disabled={(!topic.trim() && attachments.length === 0 && !dictation.active) || busy || uploadingCount > 0}
+								className="flex size-10 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
+							>
+								<CornerDownLeftIcon className="size-5" />
+							</button>
+						</div>
 					</form>
 					{/* Same as the chat view's under-composer stats bar (owner) — no
 					    session yet, so the LEFT side renders nothing (wave 7 sweep)

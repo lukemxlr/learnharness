@@ -69,13 +69,27 @@ export function UpdateSettings({
 	homepage?: string;
 }) {
 	const { state, failed } = useUpdateState();
+	const [desktopVersion, setDesktopVersion] = useState<string | null>(null);
+	useEffect(() => {
+		let live = true;
+		if (window.lh?.isRemoteMode && typeof window.lh.getAppVersion === "function") {
+			void window.lh.getAppVersion().then((v) => {
+				if (live && typeof v === "string" && v.trim()) setDesktopVersion(v.trim());
+			}).catch(() => {});
+		}
+		return () => { live = false; };
+	}, []);
 	const [checkFailed, setCheckFailed] = useState(false);
 	useEffect(() => setCheckFailed(false), [state]);
 	const active = state !== null && state.status !== "disabled";
 	const busy = state?.status === "checking" || state?.status === "downloading";
 	const status = state?.status === "downloaded" ? updateStatusText(state)
 		: failed || checkFailed ? UPDATE_ERROR : updateStatusText(state);
-	const releaseNotes = version && homepage ? `${homepage}/releases/tag/v${version}` : null;
+	const displayVersion = desktopVersion && version && desktopVersion !== version
+		? `${desktopVersion} (Server ${version})`
+		: (desktopVersion || version || "unknown");
+	const releaseTagVersion = desktopVersion || version;
+	const releaseNotes = releaseTagVersion && homepage ? `${homepage}/releases/tag/v${releaseTagVersion}` : null;
 	const check = () => {
 		setCheckFailed(false);
 		void window.lh?.checkForUpdates?.().catch(() => setCheckFailed(true));
@@ -84,7 +98,7 @@ export function UpdateSettings({
 	return (
 		<>
 			<SettingsRow
-				label={`Version ${version || "unknown"}`}
+				label={`Version ${displayVersion}`}
 				testid="row-version"
 				hint={
 					<>

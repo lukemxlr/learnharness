@@ -974,12 +974,31 @@ export function Chat({
 		});
 	};
 
-	const deliverOpeningPrompt = (prompt: string, captureNative = false) => {
+	const stageComposerAttachments = useCallback((items: readonly AttachmentRef[]) => {
+		if (items.length === 0) return;
+		const prev = stagedByTargetRef.current;
+		const cur = prev.composer ?? { items: [], uploadingCount: 0, error: null };
+		const nextItems = [...cur.items];
+		for (const ref of items) {
+			if (!nextItems.some((existing) => existing.id === ref.id)) nextItems.push(ref);
+		}
+		const nextState = { ...prev, composer: { ...cur, items: nextItems, error: null } };
+		stagedByTargetRef.current = nextState;
+		setStagedByTarget(nextState);
+	}, []);
+
+	const deliverOpeningPrompt = (prompt: string, captureNative = false, initialAttachments?: readonly AttachmentRef[]) => {
 		let submitted = prompt;
 		openingDraftRef.current = prompt;
+		if (initialAttachments && initialAttachments.length > 0) {
+			stageComposerAttachments(initialAttachments);
+		}
+		const stagedNow = initialAttachments && initialAttachments.length > 0
+			? initialAttachments
+			: stagedByTargetRef.current.composer?.items;
 		// Persist uncertainty BEFORE the POST: another mount must restore,
 		// not race the still-arriving request. No storage means no auto-send.
-		if (!stashOpeningPrompt(chatId, prompt, true)) {
+		if (!stashOpeningPrompt(chatId, prompt, true, stagedNow)) {
 			applyText(prompt);
 			setOpeningError(true);
 			return;
@@ -992,7 +1011,7 @@ export function Chat({
 			if (draftRef.current === submitted) draftRef.current = null;
 		}, captured => {
 			submitted = captured; openingDraftRef.current = captured;
-			const saved = stashOpeningPrompt(chatId, captured, true);
+			const saved = stashOpeningPrompt(chatId, captured, true, stagedByTargetRef.current.composer?.items);
 			if (!saved) setOpeningError(true);
 			return saved;
 		}).then(accepted => {
@@ -1010,20 +1029,24 @@ export function Chat({
 			() => {
 				sentInitial.current = true;
 				const entry = readOpeningPromptEntry(chatId);
-				const prompt = initialPrompt || entry?.text; // Legacy links still work.
-				if (!initialPromptOwed(initialMessages, prompt)) {
-					if (initialMessages.some(m => m.role === "user" || m.role === "assistant")) clearOpeningPrompt(chatId);
+				const prompt = initialPrompt || entry?.text || ""; // Legacy links still work.
+				const openingAttachments = entry?.attachments ?? [];
+				const hasOpening = prompt.length > 0 || openingAttachments.length > 0;
+				const hasConversation = initialMessages.some(m => m.role === "user" || m.role === "assistant");
+				if (hasConversation || !hasOpening) {
+					if (hasConversation) clearOpeningPrompt(chatId);
 					return;
 				}
-				openingDraftRef.current = prompt!;
+				openingDraftRef.current = prompt;
 				if (entry?.attempted || initiallyInFlight) {
-					applyText(prompt!); // Interrupted start: the learner explicitly resends.
+					applyText(prompt); // Interrupted start: the learner explicitly resends.
+					if (openingAttachments.length > 0) stageComposerAttachments(openingAttachments);
 					return;
 				}
-				deliverOpeningPrompt(prompt!);
+				deliverOpeningPrompt(prompt, false, openingAttachments);
 			},
 		);
-	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, surfaceTarget, deliverOpeningPrompt, applyText]);
+	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, surfaceTarget, deliverOpeningPrompt, applyText, stageComposerAttachments]);
 
 	useEffect(() => {
 		if (!hasConfirmedConversation) return;

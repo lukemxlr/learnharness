@@ -17,7 +17,8 @@ import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
-import type { ChatSettings, GraphSnapshot } from "@/src/core";
+import { formatAttachmentUploadError, uploadAttachmentFile } from "@/components/attachment-staging";
+import type { AttachmentRef, ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
  *  bar lifts — resolved nodes as the learner SAW them at pick time. */
@@ -50,17 +51,24 @@ export async function startDraftSession(
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
+	attachments?: readonly AttachmentRef[],
 ): Promise<string | null> {
 	const t = text.trim();
-	if (!t) return null;
+	const hasAttachments = Boolean(attachments && attachments.length > 0);
+	if (!t && !hasAttachments) return null;
+	const title = t || attachments![0]?.filename || "New session";
 	// THE PICKS RIDE THE CREATE (owner round 10): a practice draft seeded
 	// from the pick bar creates its session WITH the graph context — the
 	// same contract as the home screen's practice send (the marker with
 	// [id] name: statement lines, target validation's truth set).
 	return starter.start(
-		mode === "practice"
-			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+		{
+			title,
+			...(t ? {} : { openingText: "" }),
+			...(hasAttachments ? { attachments } : {}),
+			...(mode === "practice" ? { kind: "practice" as const } : {}),
+			...(mode === "practice" && picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}),
+		},
 		fetchLike,
 		settingsIdentity,
 	);
@@ -83,6 +91,12 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	attachments = [],
+	uploading = false,
+	uploadError = null,
+	onUploadFiles,
+	onRemoveAttachment,
+	onDismissUploadError,
 }: {
 	busy: boolean;
 	text: string;
@@ -110,6 +124,12 @@ export function DraftShell({
 	 *  the graph view (the overlay fills its column, never the sidebar).
 	 *  Passed as a node so the pick state stays in NewSession. */
 	overlay?: ReactNode;
+	attachments?: readonly AttachmentRef[];
+	uploading?: boolean;
+	uploadError?: string | null;
+	onUploadFiles?: (files: File[]) => void;
+	onRemoveAttachment?: (id: string, index: number) => void;
+	onDismissUploadError?: () => void;
 }) {
 	const controller = useOptionalInteractionLayers();
 	const pathname = usePathname();
@@ -132,7 +152,7 @@ export function DraftShell({
 	// round, owner 2026-10-01): the spoken text is deferred in the run's
 	// buffer — Enter must reach the finish-first send, not be gated out by
 	// an empty textarea. Nothing said → the send no-ops.
-	const canSend = text.trim().length > 0 || dictation.active;
+	const canSend = !uploading && (text.trim().length > 0 || dictation.active || attachments.length > 0);
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): stop the run, let the
 	 * last finals land through onChange, THEN call the parent's send —
 	 * which reads its REF mirror, so the post-await timing of React's
@@ -208,6 +228,12 @@ export function DraftShell({
 										inputRef={composerInputRef}
 										autoFocus
 										onEscape={dictation.active ? dictation.cancel : undefined}
+										attachments={attachments}
+										uploading={uploading}
+										uploadError={uploadError}
+										onUploadFiles={onUploadFiles}
+										onRemoveAttachment={onRemoveAttachment}
+										onDismissUploadError={onDismissUploadError}
 										// The opening question, same as the graph view's new-session
 										// input (owner refinement round, 2026-09-24) — no lesson has
 										// started yet, so the composer must not read like one is in
@@ -255,6 +281,41 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
 	const [startError, setStartError] = useState(false);
+	const [attachments, setAttachments] = useState<AttachmentRef[]>([]);
+	const attachmentsRef = useRef<AttachmentRef[]>([]);
+	const [uploadingCount, setUploadingCount] = useState(0);
+	const [uploadError, setUploadError] = useState<string | null>(null);
+	const handleUploadFiles = useCallback(async (files: File[]) => {
+		if (files.length === 0) return;
+		setUploadError(null);
+		setUploadingCount((c) => c + files.length);
+		const uploaded: AttachmentRef[] = [];
+		let lastError: string | null = null;
+		for (const file of files) {
+			try {
+				uploaded.push(await uploadAttachmentFile(file));
+			} catch (err) {
+				lastError = formatAttachmentUploadError(err);
+			}
+		}
+		setAttachments((prev) => {
+			const next = [...prev];
+			for (const ref of uploaded) {
+				if (!next.some((item) => item.id === ref.id)) next.push(ref);
+			}
+			attachmentsRef.current = next;
+			return next;
+		});
+		setUploadingCount((c) => Math.max(0, c - files.length));
+		if (lastError) setUploadError(lastError);
+	}, []);
+	const handleRemoveAttachment = useCallback((id: string, index: number) => {
+		setAttachments((prev) => {
+			const next = prev.filter((item, idx) => !(item.id === id && idx === index));
+			attachmentsRef.current = next;
+			return next;
+		});
+	}, []);
 	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
 	// snapshot the standalone chain-table picker reads. Lazy — the graph
 	// is fetched on FIRST open only, then reused.
@@ -292,7 +353,8 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 
 	const send = useCallback(() => {
 		const draft = textRef.current.trim();
-		if (!draft || startingRef.current) return;
+		const staged = attachmentsRef.current;
+		if ((!draft && staged.length === 0) || startingRef.current || uploadingCount > 0) return;
 		if (!configured) {
 			setSetupOpen(true);
 			return;
@@ -315,8 +377,15 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
-			starterRef.current, JSON.stringify(catalog?.slots.strong))
+		void startDraftSession(
+			draft,
+			fetch,
+			mode === "practice" ? "practice" : undefined,
+			mode === "practice" ? picksRef.current : undefined,
+			starterRef.current,
+			JSON.stringify(catalog?.slots.strong),
+			staged.length > 0 ? staged : undefined,
+		)
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
@@ -326,7 +395,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				setBusy(false);
 				setStartError(true);
 			});
-	}, [router, configured, zeroKeys, catalog, mode]);
+	}, [router, configured, zeroKeys, catalog, mode, uploadingCount]);
 
 	return (
 		<>
@@ -340,6 +409,12 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				attachments={attachments}
+				uploading={uploadingCount > 0}
+				uploadError={uploadError}
+				onUploadFiles={(files) => { void handleUploadFiles(files); }}
+				onRemoveAttachment={handleRemoveAttachment}
+				onDismissUploadError={() => setUploadError(null)}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative

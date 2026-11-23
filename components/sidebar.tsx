@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteFolderDialog, DeleteSessionDialog, folderDeleteCopy, type DeleteDialogCopy } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
-import { DumbbellIcon, EllipsisIcon, FolderPlusIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, EllipsisIcon, FolderPlusIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon, Share2Icon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -59,7 +59,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  *
  * Mirrors SIDEBAR_AUTOCLOSE in electron/main.cjs — keep in sync.
  */
-import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
+import type { ChatGPTControlBridge, LocalMigrationResult, LocalMigrationSummary, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
 import { readVisualViewport, subscribeVisualViewport, syncVisualViewportVars } from "@/components/visual-viewport";
@@ -77,8 +77,14 @@ declare global {
 			platform?: string;
 			/** True when running inside the remote-server Electron wrapper (preload-remote.cjs). */
 			isRemoteMode?: boolean;
-			/** Opens the remote server connection setup screen in remote Electron mode. */
+			/** Read-only Electron desktop app version (preload-remote.cjs). */
+			getAppVersion?: () => Promise<string>;
+			/** Opens the remote server connection setup screen in Electron mode. */
 			changeServerUrl?: () => Promise<unknown>;
+			/** Inspect fixed local desktop data directory counts for 1-click server migration. */
+			inspectLocalProfile?: () => Promise<LocalMigrationSummary>;
+			/** Run dry-run or live 1-click migration from local desktop data to connected remote server. */
+			migrateLocalProfile?: (opts?: { dryRun?: boolean }) => Promise<LocalMigrationResult>;
 			/** Resolve an OS-backed File without copying/uploading its contents. */
 			getPathForFile?: (file: File) => string;
 			/** Choose one original directory path, without reading its contents. */
@@ -1041,6 +1047,25 @@ function SessionsSidebar() {
 							<PanelLeftCloseIcon className="size-4" />
 						</Button>
 					</Hint>
+				</div>
+
+				{/* Always-visible link back to the Knowledge Graph (also accessible via logo & Mod+G). */}
+				<div className="px-3 pb-1">
+					<Link
+						href="/"
+						data-testid="nav-knowledge-graph"
+						title="Knowledge Graph"
+						onClick={() => closeDrawer()}
+						className={cn(
+							"flex min-h-11 lg:min-h-0 [@media(pointer:coarse)]:min-h-11 min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider transition-colors",
+							pathname === "/"
+								? "bg-accent text-foreground"
+								: "text-muted-foreground hover:bg-accent hover:text-foreground",
+						)}
+					>
+						<Share2Icon className="size-3 shrink-0" />
+						<span className="min-w-0 truncate">Knowledge Graph</span>
+					</Link>
 				</div>
 
 				{/* Core doors always lead explicit plugin sidebar placements. */}
